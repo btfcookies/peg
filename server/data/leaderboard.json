@@ -1,0 +1,33 @@
+[
+  {
+    "username": "bob",
+    "coins": 46803,
+    "totalCoins": 97191,
+    "totalBalls": 12,
+    "upgrades": {
+      "ballsPerDrop": 9,
+      "gravityLevel": 8,
+      "pegLevel": 11,
+      "rainbowLevel": 7,
+      "slotGlobalLevel": 7
+    },
+    "slotLevels": [
+      5,
+      4,
+      5,
+      6,
+      11,
+      6,
+      5,
+      4,
+      5
+    ],
+    "ownedSkins": [
+      "default",
+      "prisma",
+      "ember"
+    ],
+    "selectedSkin": "ember",
+    "updatedAt": "2026-04-09T20:16:40.711Z"
+  }
+]

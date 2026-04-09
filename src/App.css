@@ -185,6 +185,34 @@
   font: 400 1.1rem/1.5 'VT323', monospace;
 }
 
+.main-nav {
+  margin-top: 10px;
+  display: flex;
+  gap: 8px;
+}
+
+.main-nav-tab {
+  border: 2px solid #00ff4144;
+  background: #0f140f;
+  color: #5ac87a;
+  font: 400 0.95rem/1 'VT323', monospace;
+  padding: 6px 12px;
+  cursor: pointer;
+  letter-spacing: 0.04em;
+  transition: background 80ms ease, color 80ms ease, border-color 80ms ease;
+}
+
+.main-nav-tab:hover {
+  border-color: #00ff41;
+  color: #c8ffc8;
+}
+
+.main-nav-tab.active {
+  border-color: #ffb700;
+  color: #ffb700;
+  background: #1a1406;
+}
+
 .coin-bar {
   min-width: 150px;
   border: 2px solid #ffb700;
@@ -402,8 +430,26 @@
 
 .shop-tabs {
   display: grid;
-  grid-template-columns: 1fr 1fr;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
   gap: 6px;
+}
+
+.leaderboard-main {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+}
+
+.leaderboard-main-grid {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) minmax(280px, 360px);
+  gap: 12px;
+  align-items: start;
+}
+
+.leaderboard-main .leaderboard-list {
+  max-height: none;
+  min-height: 360px;
 }
 
 .shop-tab {
@@ -585,6 +631,198 @@
   opacity: 0.35;
 }
 
+.leaderboard-submit {
+  border: 2px solid #1e3a5f;
+  background: #10151f;
+  padding: 10px;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.leaderboard-submit label {
+  font: 400 0.72rem/1.1 'Press Start 2P', monospace;
+  color: #aac8ff;
+  text-transform: uppercase;
+}
+
+.leaderboard-submit-row {
+  display: flex;
+  gap: 8px;
+}
+
+.leaderboard-submit-row input {
+  flex: 1;
+  border: 2px solid #2a4669;
+  background: #080a11;
+  color: #dceeff;
+  font: 400 1rem/1 'VT323', monospace;
+  padding: 6px 8px;
+}
+
+.leaderboard-submit-row input::placeholder {
+  color: #5c7596;
+}
+
+.leaderboard-submit-row button {
+  border: 2px solid #ffb700;
+  background: #ffb700;
+  color: #080808;
+  font: 400 0.95rem/1 'VT323', monospace;
+  padding: 6px 10px;
+  cursor: pointer;
+}
+
+.leaderboard-submit-row button:hover:not(:disabled) {
+  background: #080808;
+  color: #ffb700;
+}
+
+.leaderboard-submit-row button:disabled {
+  opacity: 0.45;
+  cursor: not-allowed;
+}
+
+.leaderboard-status {
+  margin: 0;
+  color: #5ac87a;
+  font: 400 0.95rem/1.2 'VT323', monospace;
+}
+
+.leaderboard-status.error {
+  color: #ff7c7c;
+}
+
+.leaderboard-list {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  max-height: 230px;
+  overflow: auto;
+  padding-right: 2px;
+}
+
+.leaderboard-row {
+  border: 2px solid #1e3a5f;
+  background: #0d1016;
+  color: #aac8ff;
+  padding: 6px 8px;
+  display: grid;
+  grid-template-columns: 52px 1fr auto auto;
+  gap: 8px;
+  align-items: center;
+  text-align: left;
+  cursor: pointer;
+}
+
+.leaderboard-row:hover {
+  border-color: #aac8ff;
+  background: #11192b;
+}
+
+.leaderboard-row.active {
+  border-color: #57d5ff;
+  box-shadow: 0 0 0 1px #57d5ff44;
+}
+
+.leaderboard-rank,
+.leaderboard-coins,
+.leaderboard-name {
+  font: 400 1rem/1 'VT323', monospace;
+}
+
+.leaderboard-name {
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.leaderboard-badge {
+  border: 1px solid #566b8f;
+  padding: 1px 5px;
+  font: 400 0.7rem/1.1 'Press Start 2P', monospace;
+  text-transform: uppercase;
+}
+
+.leaderboard-row.badge-1st {
+  border-color: #ffcf4f;
+  background: linear-gradient(90deg, #191205, #24190a, #191205);
+}
+
+.leaderboard-row.badge-1st .leaderboard-badge {
+  border-color: #ffcf4f;
+  color: #ffcf4f;
+}
+
+.leaderboard-row.badge-2nd {
+  border-color: #d0dbef;
+  background: linear-gradient(90deg, #13151b, #1d222c, #13151b);
+}
+
+.leaderboard-row.badge-2nd .leaderboard-badge {
+  border-color: #d0dbef;
+  color: #d0dbef;
+}
+
+.leaderboard-row.badge-3rd {
+  border-color: #d18d4f;
+  background: linear-gradient(90deg, #1c120a, #27190e, #1c120a);
+}
+
+.leaderboard-row.badge-3rd .leaderboard-badge {
+  border-color: #d18d4f;
+  color: #d18d4f;
+}
+
+.leaderboard-player-card {
+  border: 2px solid #244465;
+  background: #10151f;
+  padding: 10px;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.leaderboard-player-card h3,
+.leaderboard-player-card h4 {
+  margin: 0;
+  color: #ddeeff;
+  font: 400 0.75rem/1.3 'Press Start 2P', monospace;
+}
+
+.leaderboard-player-grid {
+  display: grid;
+  grid-template-columns: 1fr auto;
+  gap: 5px 8px;
+}
+
+.leaderboard-player-grid span,
+.leaderboard-player-grid strong {
+  font: 400 1rem/1 'VT323', monospace;
+}
+
+.leaderboard-player-grid span {
+  color: #728eb1;
+}
+
+.leaderboard-player-grid strong {
+  color: #cde5ff;
+}
+
+.leaderboard-upgrades {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+
+.leaderboard-upgrade-row {
+  display: grid;
+  grid-template-columns: 1fr auto;
+  gap: 8px;
+  font: 400 1rem/1 'VT323', monospace;
+  color: #aac8ff;
+}
+
 @keyframes boardShake {
   0% {
     transform: translateX(0);
@@ -675,6 +913,15 @@
     flex-direction: column;
   }
 
+  .main-nav {
+    width: 100%;
+    flex-wrap: wrap;
+  }
+
+  .main-nav-tab {
+    flex: 1;
+  }
+
   .topbar h1 {
     font-size: 2.3rem;
   }
@@ -697,5 +944,26 @@
 
   .slot-card small {
     font-size: 0.55rem;
+  }
+
+  .shop-tabs {
+    grid-template-columns: 1fr;
+  }
+
+  .leaderboard-main-grid {
+    grid-template-columns: 1fr;
+  }
+
+  .leaderboard-submit-row {
+    flex-direction: column;
+  }
+
+  .leaderboard-row {
+    grid-template-columns: 52px 1fr auto;
+  }
+
+  .leaderboard-badge {
+    grid-column: 1 / -1;
+    justify-self: start;
   }
 }

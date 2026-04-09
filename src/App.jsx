@@ -46,14 +46,6 @@ const upgradeCatalog = [
     growth: 1.8,
     maxLevel: 10,
   },
-  {
-    id: 'frenzyLevel',
-    title: 'Neon Frenzy',
-    description: 'Unlock auto-drops and huge payout surges.',
-    baseCost: 110,
-    growth: 2.2,
-    maxLevel: 5,
-  },
 ]
 
 const skinCatalog = [
@@ -104,7 +96,6 @@ const UPGRADE_DEFAULTS = {
   pegLevel: 1,
   rainbowLevel: 0,
   slotGlobalLevel: 1,
-  frenzyLevel: 0,
 }
 
 const UPGRADE_MIN_LEVELS = {
@@ -113,11 +104,12 @@ const UPGRADE_MIN_LEVELS = {
   pegLevel: 1,
   rainbowLevel: 0,
   slotGlobalLevel: 1,
-  frenzyLevel: 0,
 }
 
 const UPGRADE_MAX_LEVELS = Object.fromEntries(upgradeCatalog.map((upgrade) => [upgrade.id, upgrade.maxLevel]))
 const SAVE_STORAGE_KEY = 'peg-progress-v1'
+const LEADERBOARD_USERNAME_KEY = 'peg-leaderboard-username-v1'
+const LEADERBOARD_LIMIT = 50
 
 function lerpColor(from, to, amount) {
   const t = Math.min(1, Math.max(0, amount))
@@ -148,14 +140,7 @@ function getPegRenderStyle(pegLevel) {
   }
 }
 
-function getBallRenderStyle(skinId, fallbackHue, frenzyActive) {
-  if (frenzyActive) {
-    return {
-      fillStyle: '#ffe66e',
-      strokeStyle: '#132318',
-      lineWidth: 2,
-    }
-  }
+function getBallRenderStyle(skinId, fallbackHue) {
 
   switch (skinId) {
     case 'ember':
@@ -268,7 +253,6 @@ function defaultProgress() {
     coins: 40,
     totalCoins: 0,
     totalBalls: 3,
-    frenzyUntil: 0,
     upgrades: { ...UPGRADE_DEFAULTS },
     slotLevels: Array.from({ length: SLOT_COUNT }, () => 1),
     slotFill: Array.from({ length: SLOT_COUNT }, () => 0),
@@ -296,7 +280,6 @@ function loadProgress() {
       coins: clampNumber(parsed?.coins, 0, Number.MAX_SAFE_INTEGER, fallback.coins),
       totalCoins: clampNumber(parsed?.totalCoins, 0, Number.MAX_SAFE_INTEGER, fallback.totalCoins),
       totalBalls: clampNumber(parsed?.totalBalls, 1, 9999, fallback.totalBalls),
-      frenzyUntil: clampNumber(parsed?.frenzyUntil, 0, Number.MAX_SAFE_INTEGER, fallback.frenzyUntil),
       upgrades: normalizeUpgrades(parsed?.upgrades),
       slotLevels: normalizeArray(parsed?.slotLevels, SLOT_COUNT, 1, 9999, 1),
       slotFill: normalizeArray(parsed?.slotFill, SLOT_COUNT, 0, 999999, 0),
@@ -353,11 +336,6 @@ function createAudioEngine() {
       window.setTimeout(() => tone({ frequency: 1700, type: 'sine', duration: 0.16, gain: 0.08 }), 52)
     },
     fail: () => tone({ frequency: 140, type: 'sawtooth', duration: 0.1, gain: 0.06 }),
-    frenzy: () => {
-      tone({ frequency: 260, type: 'square', duration: 0.12, gain: 0.08 })
-      tone({ frequency: 390, type: 'square', duration: 0.12, gain: 0.08 })
-      tone({ frequency: 520, type: 'triangle', duration: 0.2, gain: 0.08 })
-    },
     setVolume: (v) => {
       const next = Math.max(0, Math.min(1, Number(v) || 0))
       master.gain.cancelScheduledValues(ctx.currentTime)
@@ -384,10 +362,26 @@ function App() {
   const [activeBalls, setActiveBalls] = useState(0)
   const [flashCoins, setFlashCoins] = useState(false)
   const [boardShake, setBoardShake] = useState(false)
-  const [frenzyUntil, setFrenzyUntil] = useState(initialProgress.frenzyUntil)
   const [floaters, setFloaters] = useState([])
   const [showSettings, setShowSettings] = useState(false)
+  const [mainTab, setMainTab] = useState('game')
   const [shopTab, setShopTab] = useState('upgrades')
+  const [leaderboardEntries, setLeaderboardEntries] = useState([])
+  const [leaderboardLoading, setLeaderboardLoading] = useState(false)
+  const [leaderboardError, setLeaderboardError] = useState('')
+  const [leaderboardSubmitStatus, setLeaderboardSubmitStatus] = useState('')
+  const [leaderboardSubmitting, setLeaderboardSubmitting] = useState(false)
+  const [selectedLeaderboardPlayer, setSelectedLeaderboardPlayer] = useState(null)
+  const [leaderboardUsername, setLeaderboardUsername] = useState(() => {
+    if (typeof window === 'undefined') {
+      return ''
+    }
+    try {
+      return window.localStorage.getItem(LEADERBOARD_USERNAME_KEY) ?? ''
+    } catch {
+      return ''
+    }
+  })
   const [soundOn, setSoundOn] = useState(initialProgress.soundOn)
   const [volume, setVolume] = useState(initialProgress.volume)
   const [ownedSkins, setOwnedSkins] = useState(initialProgress.ownedSkins)
@@ -412,7 +406,6 @@ function App() {
       coins,
       totalCoins,
       totalBalls,
-      frenzyUntil,
       upgrades,
       slotLevels,
       slotFill,
@@ -426,7 +419,96 @@ function App() {
     } catch {
       // Ignore storage write errors and continue gameplay.
     }
-  }, [coins, totalCoins, totalBalls, frenzyUntil, upgrades, slotLevels, slotFill, ownedSkins, selectedSkin, soundOn, volume])
+  }, [coins, totalCoins, totalBalls, upgrades, slotLevels, slotFill, ownedSkins, selectedSkin, soundOn, volume])
+
+  useEffect(() => {
+    if (typeof window === 'undefined') {
+      return
+    }
+    try {
+      window.localStorage.setItem(LEADERBOARD_USERNAME_KEY, leaderboardUsername)
+    } catch {
+      // Ignore username storage failures.
+    }
+  }, [leaderboardUsername])
+
+  const refreshLeaderboard = useCallback(async () => {
+    setLeaderboardLoading(true)
+    setLeaderboardError('')
+    try {
+      const response = await fetch(`/api/leaderboard?limit=${LEADERBOARD_LIMIT}`)
+      if (!response.ok) {
+        throw new Error('Could not load leaderboard.')
+      }
+      const data = await response.json()
+      const entries = Array.isArray(data?.entries) ? data.entries : []
+      setLeaderboardEntries(entries)
+      setSelectedLeaderboardPlayer((previous) => {
+        if (!previous) {
+          return entries[0] ?? null
+        }
+        return entries.find((entry) => entry.username === previous.username) ?? entries[0] ?? null
+      })
+    } catch {
+      setLeaderboardError('Leaderboard server unavailable. Start npm run server.')
+    } finally {
+      setLeaderboardLoading(false)
+    }
+  }, [])
+
+  useEffect(() => {
+    refreshLeaderboard()
+    const intervalId = window.setInterval(() => {
+      refreshLeaderboard()
+    }, 15000)
+    return () => {
+      window.clearInterval(intervalId)
+    }
+  }, [refreshLeaderboard])
+
+  const submitLeaderboardScore = useCallback(async () => {
+    const username = leaderboardUsername.trim()
+    if (!/^[a-zA-Z0-9 _-]{3,20}$/.test(username)) {
+      setLeaderboardSubmitStatus('Username must be 3-20 chars: letters, numbers, spaces, _ or -.')
+      return
+    }
+
+    setLeaderboardSubmitting(true)
+    setLeaderboardSubmitStatus('')
+
+    try {
+      const response = await fetch('/api/leaderboard/submit', {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify({
+          username,
+          coins: Math.floor(coins),
+          totalCoins: Math.floor(totalCoins),
+          totalBalls,
+          upgrades,
+          slotLevels,
+          ownedSkins,
+          selectedSkin,
+        }),
+      })
+
+      const data = await response.json().catch(() => ({}))
+
+      if (!response.ok) {
+        setLeaderboardSubmitStatus(typeof data?.error === 'string' ? data.error : 'Could not submit score.')
+        return
+      }
+
+      setLeaderboardSubmitStatus(`Submitted! Current rank: #${data.rank}`)
+      await refreshLeaderboard()
+    } catch {
+      setLeaderboardSubmitStatus('Submission failed. Is the server running?')
+    } finally {
+      setLeaderboardSubmitting(false)
+    }
+  }, [coins, leaderboardUsername, ownedSkins, refreshLeaderboard, selectedSkin, slotLevels, totalBalls, totalCoins, upgrades])
 
   const addFloater = useCallback((x, y, text, kind = 'coin') => {
     const id = window.crypto.randomUUID()
@@ -440,8 +522,6 @@ function App() {
     () => SLOT_BASE_REWARDS.map((base, i) => Math.round(base * slotLevels[i] * (0.8 + upgrades.slotGlobalLevel * 0.25))),
     [slotLevels, upgrades.slotGlobalLevel],
   )
-
-  const frenzyActive = frenzyUntil > Date.now()
 
   const registerCoins = useCallback(
     (amount) => {
@@ -471,7 +551,7 @@ function App() {
     const width = engine.render?.options?.width ?? 760
     const xCenter = width / 2
     const hue = 175 + Math.floor(Math.random() * 90)
-    const ballRenderStyle = getBallRenderStyle(selectedSkin, hue, frenzyActive)
+    const ballRenderStyle = getBallRenderStyle(selectedSkin, hue)
     const ball = Matter.Bodies.polygon(xCenter + (Math.random() - 0.5) * 24, 32, 8, 8.8, {
       restitution: 0.6,
       friction: 0.004,
@@ -483,7 +563,6 @@ function App() {
         intensity,
         createdAt: Date.now(),
         skinId: selectedSkin,
-        frenzyBall: frenzyActive,
         gradientSeed: Math.random(),
       },
     })
@@ -492,10 +571,10 @@ function App() {
     const nextCount = countLiveBalls(engine.world)
     stateRef.current.activeBalls = nextCount
     setActiveBalls((previous) => (previous === nextCount ? previous : nextCount))
-  }, [frenzyActive, selectedSkin])
+  }, [selectedSkin])
 
   const dropBallWave = useCallback(() => {
-    const count = stateRef.current.upgrades.ballsPerDrop + (frenzyActive ? 1 : 0)
+    const count = stateRef.current.upgrades.ballsPerDrop
     let spawned = 0
     for (let i = 0; i < count; i += 1) {
       if (activeBalls + spawned >= totalBalls) break
@@ -503,7 +582,7 @@ function App() {
       spawned += 1
       window.setTimeout(() => spawnBall(1 + i * 0.1), delay)
     }
-  }, [frenzyActive, spawnBall, activeBalls, totalBalls])
+  }, [spawnBall, activeBalls, totalBalls])
 
   const stopHoldDrop = useCallback(() => {
     if (holdDropIntervalRef.current) {
@@ -655,13 +734,12 @@ function App() {
 
         if (pegHit) {
           audioRef.current?.peg()
-          const { pegLevel, rainbowLevel, frenzyLevel } = stateRef.current.upgrades
+          const { pegLevel, rainbowLevel } = stateRef.current.upgrades
           const pegChance = Math.min(0.9, 1 / 3 + rainbowLevel * 0.1)
           if (Math.random() < pegChance) {
             const crit = Math.random() < 0.1
-            const frenzyBoost = frenzyActive ? 1 + frenzyLevel * 0.55 : 1
-            const pegPayoutMultiplier = 1 + Math.max(0, pegLevel - 1) * 0.5
-            const amount = Math.max(1, Math.round(pegPayoutMultiplier * (crit ? 5 : 1) * frenzyBoost))
+            const pegPayoutMultiplier = 1.5 ** Math.max(0, pegLevel - 1)
+            const amount = Math.max(1, Math.ceil((crit ? 5 : 1) * pegPayoutMultiplier))
             registerCoins(amount)
             const x = (ballBody.position.x / width) * 100
             const y = (ballBody.position.y / height) * 100
@@ -675,10 +753,9 @@ function App() {
           const reward = Math.round(
             SLOT_BASE_REWARDS[slotIndex] * stateRef.current.slotLevels[slotIndex] * (0.8 + stateRef.current.upgrades.slotGlobalLevel * 0.25),
           )
-          const frenzyReward = frenzyActive ? Math.round(reward * (1 + stateRef.current.upgrades.frenzyLevel * 0.35)) : reward
-          registerCoins(frenzyReward)
+          registerCoins(reward)
           audioRef.current?.slot(slotIndex)
-          addFloater((ballBody.position.x / width) * 100, (ballBody.position.y / height) * 100, `+${frenzyReward}`, 'slot')
+          addFloater((ballBody.position.x / width) * 100, (ballBody.position.y / height) * 100, `+${reward}`, 'slot')
 
           setSlotFill((previous) => {
             const next = [...previous]
@@ -720,7 +797,7 @@ function App() {
       const now = performance.now()
 
       for (const body of engine.world.bodies) {
-        if (body.label !== 'ball' || body.plugin?.frenzyBall) {
+        if (body.label !== 'ball') {
           continue
         }
 
@@ -844,7 +921,7 @@ function App() {
       Matter.World.clear(engine.world, false)
       Matter.Engine.clear(engine)
     }
-  }, [addFloater, frenzyActive, registerCoins, stopHoldDrop])
+  }, [addFloater, registerCoins, stopHoldDrop])
 
   useEffect(() => {
     if (!engineRef.current) {
@@ -868,25 +945,6 @@ function App() {
       body.render.lineWidth = nextStyle.lineWidth
     }
   }, [upgrades.pegLevel])
-
-  useEffect(() => {
-    if (!frenzyActive || upgrades.frenzyLevel < 1) {
-      if (spawnIntervalRef.current) {
-        window.clearInterval(spawnIntervalRef.current)
-      }
-      return
-    }
-
-    spawnIntervalRef.current = window.setInterval(() => {
-      spawnBall(1.8)
-    }, Math.max(240, 520 - upgrades.frenzyLevel * 50))
-
-    return () => {
-      if (spawnIntervalRef.current) {
-        window.clearInterval(spawnIntervalRef.current)
-      }
-    }
-  }, [frenzyActive, spawnBall, upgrades.frenzyLevel])
 
   const getUpgradeCost = useCallback((upgradeId, level) => {
     const details = upgradeCatalog.find((entry) => entry.id === upgradeId)
@@ -932,12 +990,6 @@ function App() {
         [upgradeId]: previous[upgradeId] + 1,
       }))
       audioRef.current?.buy()
-
-      if (upgradeId === 'frenzyLevel') {
-        const durationMs = 7000 + currentLevel * 2000
-        setFrenzyUntil(Date.now() + durationMs)
-        audioRef.current?.frenzy()
-      }
     },
     [coins, getUpgradeCost, upgrades],
   )
@@ -974,6 +1026,9 @@ function App() {
   }, [soundOn, volume])
 
   const averageSlotLevel = Math.round(slotLevels.reduce((sum, level) => sum + level, 0) / slotLevels.length)
+  const selectedPlayerUpgradeRows = selectedLeaderboardPlayer
+    ? Object.entries(selectedLeaderboardPlayer.upgrades ?? {}).sort(([a], [b]) => a.localeCompare(b))
+    : []
 
   return (
     <main className="layout">
@@ -982,6 +1037,22 @@ function App() {
           <div>
             <h1>Peg</h1>
             <p className="subtitle">Roguelike Plinko: hit pegs, evolve slots, chain upgrades.</p>
+            <nav className="main-nav" aria-label="Main sections">
+              <button
+                className={`main-nav-tab ${mainTab === 'game' ? 'active' : ''}`}
+                onClick={() => setMainTab('game')}
+                aria-pressed={mainTab === 'game'}
+              >
+                Play
+              </button>
+              <button
+                className={`main-nav-tab ${mainTab === 'leaderboard' ? 'active' : ''}`}
+                onClick={() => setMainTab('leaderboard')}
+                aria-pressed={mainTab === 'leaderboard'}
+              >
+                Leaderboard
+              </button>
+            </nav>
           </div>
           <div className="topbar-right">
             <div className={`coin-bar ${flashCoins ? 'flash' : ''}`}>
@@ -1041,52 +1112,144 @@ function App() {
           </div>
         )}
 
-        <div className="actions-row">
-          <button
-            className="drop-button"
-            onPointerDown={startHoldDrop}
-            onPointerUp={stopHoldDrop}
-            onPointerLeave={stopHoldDrop}
-            onPointerCancel={stopHoldDrop}
-            disabled={activeBalls >= totalBalls}
-          >
-            Drop {Math.min(upgrades.ballsPerDrop + (frenzyActive ? 1 : 0), totalBalls - activeBalls)} Ball{Math.min(upgrades.ballsPerDrop + (frenzyActive ? 1 : 0), totalBalls - activeBalls) !== 1 ? 's' : '' } (Q)
-          </button>
-          <div className="stats-chip">Balls: {activeBalls} / {totalBalls}</div>
-          <div className="stats-chip">Total Minted: {Math.floor(totalCoins).toLocaleString()}</div>
-          <div className="stats-chip">Slot Avg Lv: {averageSlotLevel}</div>
-          {frenzyActive ? <div className="stats-chip frenzy">Neon Frenzy Active</div> : null}
-        </div>
-
-        <div className={`board-wrap ${boardShake ? 'shake' : ''}`} ref={boardWrapRef}>
-          <canvas ref={canvasRef} aria-label="Peg plinko board" />
-          <div className="slot-labels">
-            {normalizedSlotRewards.map((amount, index) => {
-              const progressNeed = 7 + slotLevels[index] * 4
-              return (
-                <div key={`slot-${index}`} className="slot-card">
-                  <span className="slot-name">S{index + 1}</span>
-                  <strong>{amount}</strong>
-                  <small>
-                    Lv {slotLevels[index]} • {slotFill[index]}/{progressNeed}
-                  </small>
-                </div>
-              )
-            })}
-          </div>
-
-          <div className="floaters-layer">
-            {floaters.map((item) => (
-              <div
-                key={item.id}
-                className={`floater ${item.kind}`}
-                style={{ left: `${item.x}%`, top: `${item.y}%` }}
+        {mainTab === 'game' ? (
+          <>
+            <div className="actions-row">
+              <button
+                className="drop-button"
+                onPointerDown={startHoldDrop}
+                onPointerUp={stopHoldDrop}
+                onPointerLeave={stopHoldDrop}
+                onPointerCancel={stopHoldDrop}
+                disabled={activeBalls >= totalBalls}
               >
-                {item.text}
+                Drop {Math.min(upgrades.ballsPerDrop, totalBalls - activeBalls)} Ball{Math.min(upgrades.ballsPerDrop, totalBalls - activeBalls) !== 1 ? 's' : '' } (Q)
+              </button>
+              <div className="stats-chip">Balls: {activeBalls} / {totalBalls}</div>
+              <div className="stats-chip">Total Minted: {Math.floor(totalCoins).toLocaleString()}</div>
+              <div className="stats-chip">Slot Avg Lv: {averageSlotLevel}</div>
+            </div>
+
+            <div className={`board-wrap ${boardShake ? 'shake' : ''}`} ref={boardWrapRef}>
+              <canvas ref={canvasRef} aria-label="Peg plinko board" />
+              <div className="slot-labels">
+                {normalizedSlotRewards.map((amount, index) => {
+                  const progressNeed = 7 + slotLevels[index] * 4
+                  return (
+                    <div key={`slot-${index}`} className="slot-card">
+                      <span className="slot-name">S{index + 1}</span>
+                      <strong>{amount}</strong>
+                      <small>
+                        Lv {slotLevels[index]} • {slotFill[index]}/{progressNeed}
+                      </small>
+                    </div>
+                  )
+                })}
               </div>
-            ))}
-          </div>
-        </div>
+
+              <div className="floaters-layer">
+                {floaters.map((item) => (
+                  <div
+                    key={item.id}
+                    className={`floater ${item.kind}`}
+                    style={{ left: `${item.x}%`, top: `${item.y}%` }}
+                  >
+                    {item.text}
+                  </div>
+                ))}
+              </div>
+            </div>
+          </>
+        ) : (
+          <section className="leaderboard-main" aria-label="Leaderboard panel">
+            <div className="leaderboard-submit">
+              <label htmlFor="leaderboard-username">Username</label>
+              <div className="leaderboard-submit-row">
+                <input
+                  id="leaderboard-username"
+                  type="text"
+                  value={leaderboardUsername}
+                  placeholder="Enter a username"
+                  maxLength={20}
+                  onChange={(event) => setLeaderboardUsername(event.target.value)}
+                />
+                <button onClick={submitLeaderboardScore} disabled={leaderboardSubmitting}>
+                  {leaderboardSubmitting ? 'Sending...' : 'Submit'}
+                </button>
+              </div>
+              {leaderboardSubmitStatus && <p className="leaderboard-status">{leaderboardSubmitStatus}</p>}
+              {leaderboardError && <p className="leaderboard-status error">{leaderboardError}</p>}
+            </div>
+
+            <div className="leaderboard-main-grid">
+              <div className="leaderboard-list" role="list">
+                {leaderboardLoading && leaderboardEntries.length === 0 ? (
+                  <p className="sidebar-note">Loading rankings...</p>
+                ) : (
+                  leaderboardEntries.map((entry) => {
+                    const isSelected = selectedLeaderboardPlayer?.username === entry.username
+                    const badge =
+                      entry.rank === 1
+                        ? '1ST'
+                        : entry.rank === 2
+                          ? '2ND'
+                          : entry.rank === 3
+                            ? '3RD'
+                            : null
+
+                    return (
+                      <button
+                        key={entry.username}
+                        className={`leaderboard-row ${isSelected ? 'active' : ''} ${badge ? `badge-${badge.toLowerCase()}` : ''}`}
+                        onClick={() => setSelectedLeaderboardPlayer(entry)}
+                        role="listitem"
+                      >
+                        <span className="leaderboard-rank">#{entry.rank}</span>
+                        <span className="leaderboard-name">{entry.username}</span>
+                        <span className="leaderboard-coins">{entry.coins.toLocaleString()}c</span>
+                        {badge && <span className="leaderboard-badge">{badge}</span>}
+                      </button>
+                    )
+                  })
+                )}
+              </div>
+
+              {selectedLeaderboardPlayer && (
+                <article className="leaderboard-player-card">
+                  <h3>
+                    {selectedLeaderboardPlayer.username} • Rank #{selectedLeaderboardPlayer.rank}
+                  </h3>
+                  <div className="leaderboard-player-grid">
+                    <span>Coins</span>
+                    <strong>{selectedLeaderboardPlayer.coins.toLocaleString()}</strong>
+                    <span>Total Coins</span>
+                    <strong>{selectedLeaderboardPlayer.totalCoins.toLocaleString()}</strong>
+                    <span>Balls</span>
+                    <strong>{selectedLeaderboardPlayer.totalBalls}</strong>
+                    <span>Skin</span>
+                    <strong>{selectedLeaderboardPlayer.selectedSkin ?? 'default'}</strong>
+                    <span>Skins</span>
+                    <strong>{(selectedLeaderboardPlayer.ownedSkins ?? []).length}</strong>
+                  </div>
+
+                  <h4>Upgrades</h4>
+                  <div className="leaderboard-upgrades">
+                    {selectedPlayerUpgradeRows.length === 0 ? (
+                      <span>None</span>
+                    ) : (
+                      selectedPlayerUpgradeRows.map(([name, level]) => (
+                        <div key={name} className="leaderboard-upgrade-row">
+                          <span>{name}</span>
+                          <strong>Lv {level}</strong>
+                        </div>
+                      ))
+                    )}
+                  </div>
+                </article>
+              )}
+            </div>
+          </section>
+        )}
       </section>
 
       <aside className="sidebar">
@@ -1131,7 +1294,7 @@ function App() {
                 const cost = getUpgradeCost(upgrade.id, level + 1)
                 const isMaxed = level >= upgrade.maxLevel
                 return (
-                  <article key={upgrade.id} className={`upgrade-card ${upgrade.id === 'frenzyLevel' ? 'rare' : ''} ${isMaxed ? 'maxed' : ''}`}>
+                  <article key={upgrade.id} className={`upgrade-card ${isMaxed ? 'maxed' : ''}`}>
                     <div>
                       <h3>{upgrade.title}</h3>
                       <p>{upgrade.description}</p>
