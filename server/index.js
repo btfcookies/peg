@@ -1,6 +1,7 @@
 import cors from 'cors'
 import express from 'express'
 import fs from 'node:fs/promises'
+import mongoose from 'mongoose'
 import path from 'node:path'
 import { fileURLToPath } from 'node:url'
 
@@ -9,6 +10,7 @@ const __dirname = path.dirname(__filename)
 const DATA_DIR = path.join(__dirname, 'data')
 const LEADERBOARD_FILE = path.join(DATA_DIR, 'leaderboard.json')
 const PORT = Number(process.env.PORT) || 3001
+const MONGODB_URI = process.env.MONGODB_URI?.trim()
 
 const USERNAME_PATTERN = /^[a-zA-Z0-9 _-]{3,20}$/
 
@@ -118,18 +120,149 @@ function sortByCoins(entries) {
   })
 }
 
+async function createFileStorage() {
+  return {
+    mode: 'file',
+    async list(limit) {
+      return sortByCoins(await readEntries()).slice(0, limit)
+    },
+    async getByUsername(username) {
+      const entries = sortByCoins(await readEntries())
+      const index = entries.findIndex((entry) => entry.username.toLowerCase() === username.toLowerCase())
+      if (index === -1) {
+        return null
+      }
+      return {
+        rank: index + 1,
+        player: entries[index],
+      }
+    },
+    async upsert(entry) {
+      const entries = await readEntries()
+      const existingIndex = entries.findIndex((item) => item.username.toLowerCase() === entry.username.toLowerCase())
+
+      if (existingIndex >= 0) {
+        entries[existingIndex] = entry
+      } else {
+        entries.push(entry)
+      }
+
+      const sorted = sortByCoins(entries)
+      await writeEntries(sorted)
+      const rank = sorted.findIndex((item) => item.username.toLowerCase() === entry.username.toLowerCase()) + 1
+
+      return {
+        rank,
+        player: entry,
+      }
+    },
+  }
+}
+
+function createMongoEntryModel() {
+  const schema = new mongoose.Schema(
+    {
+      username: { type: String, required: true },
+      usernameKey: { type: String, required: true, unique: true, index: true },
+      coins: { type: Number, required: true, default: 0 },
+      totalCoins: { type: Number, required: true, default: 0 },
+      totalBalls: { type: Number, required: true, default: 1 },
+      upgrades: { type: mongoose.Schema.Types.Mixed, default: {} },
+      slotLevels: { type: [Number], default: [] },
+      ownedSkins: { type: [String], default: [] },
+      selectedSkin: { type: String, default: 'default' },
+      updatedAt: { type: String, required: true },
+    },
+    {
+      versionKey: false,
+    },
+  )
+
+  return mongoose.models.LeaderboardEntry || mongoose.model('LeaderboardEntry', schema, 'leaderboard_entries')
+}
+
+function mapMongoDocToEntry(doc) {
+  return normalizeEntry(doc) ?? normalizeEntry({ username: doc.username })
+}
+
+async function createMongoStorage(uri) {
+  await mongoose.connect(uri)
+  const Entry = createMongoEntryModel()
+
+  return {
+    mode: 'mongo',
+    async list(limit) {
+      const docs = await Entry.find({}).sort({ coins: -1, username: 1 }).limit(limit).lean()
+      return docs.map(mapMongoDocToEntry).filter(Boolean)
+    },
+    async getByUsername(username) {
+      const usernameKey = username.toLowerCase()
+      const doc = await Entry.findOne({ usernameKey }).lean()
+      if (!doc) {
+        return null
+      }
+
+      const player = mapMongoDocToEntry(doc)
+      const rankAbove = await Entry.countDocuments({
+        $or: [
+          { coins: { $gt: player.coins } },
+          { coins: player.coins, username: { $lt: player.username } },
+        ],
+      })
+
+      return {
+        rank: rankAbove + 1,
+        player,
+      }
+    },
+    async upsert(entry) {
+      const usernameKey = entry.username.toLowerCase()
+      await Entry.findOneAndUpdate(
+        { usernameKey },
+        {
+          $set: {
+            ...entry,
+            usernameKey,
+          },
+        },
+        {
+          upsert: true,
+          new: true,
+          setDefaultsOnInsert: true,
+        },
+      )
+
+      const rankAbove = await Entry.countDocuments({
+        $or: [
+          { coins: { $gt: entry.coins } },
+          { coins: entry.coins, username: { $lt: entry.username } },
+        ],
+      })
+
+      return {
+        rank: rankAbove + 1,
+        player: entry,
+      }
+    },
+  }
+}
+
 const app = express()
+let storage
 
 app.use(cors())
 app.use(express.json({ limit: '500kb' }))
 
 app.get('/api/health', (_req, res) => {
-  res.json({ ok: true })
+  res.json({
+    ok: true,
+    storage: storage?.mode ?? 'unknown',
+  })
 })
 
 app.get('/api/leaderboard', async (req, res) => {
   const limit = Math.min(200, Math.max(1, Number(req.query.limit) || 50))
-  const entries = sortByCoins(await readEntries()).slice(0, limit)
+  const entries = await storage.list(limit)
 
   const withRank = entries.map((entry, index) => ({
     rank: index + 1,
@@ -149,16 +282,15 @@ app.get('/api/leaderboard/:username', async (req, res) => {
     return
   }
 
-  const entries = sortByCoins(await readEntries())
-  const index = entries.findIndex((entry) => entry.username.toLowerCase() === username.toLowerCase())
-  if (index === -1) {
+  const result = await storage.getByUsername(username)
+  if (!result) {
     res.status(404).json({ error: 'Player not found.' })
     return
   }
 
   res.json({
-    rank: index + 1,
-    player: entries[index],
+    rank: result.rank,
+    player: result.player,
   })
 })
 
@@ -180,28 +312,34 @@ app.post('/api/leaderboard/submit', async (req, res) => {
     return
   }
 
-  const entries = await readEntries()
-  const existingIndex = entries.findIndex((entry) => entry.username.toLowerCase() === username.toLowerCase())
-
-  if (existingIndex >= 0) {
-    entries[existingIndex] = nextEntry
-  } else {
-    entries.push(nextEntry)
-  }
-
-  const sorted = sortByCoins(entries)
-  await writeEntries(sorted)
-
-  const rank = sorted.findIndex((entry) => entry.username.toLowerCase() === username.toLowerCase()) + 1
+  const result = await storage.upsert(nextEntry)
 
   res.json({
     ok: true,
-    rank,
-    player: nextEntry,
+    rank: result.rank,
+    player: result.player,
   })
 })
 
-app.listen(PORT, async () => {
-  await ensureStorage()
-  console.log(`Leaderboard server running at http://localhost:${PORT}`)
+async function initStorage() {
+  if (MONGODB_URI) {
+    storage = await createMongoStorage(MONGODB_URI)
+    return
+  }
+
+  storage = await createFileStorage()
+}
+
+async function startServer() {
+  await initStorage()
+
+  app.listen(PORT, () => {
+    console.log(`Leaderboard server running at http://localhost:${PORT}`)
+    console.log(`Leaderboard storage mode: ${storage.mode}`)
+  })
+}
+
+startServer().catch((error) => {
+  console.error('Failed to start leaderboard server:', error)
+  process.exit(1)
 })

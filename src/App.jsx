@@ -629,6 +629,10 @@ function App() {
   useEffect(() => () => stopHoldDrop(), [stopHoldDrop])
 
   useEffect(() => {
+    if (mainTab !== 'game') {
+      return undefined
+    }
+
     if (!boardWrapRef.current || !canvasRef.current) {
       return undefined
     }
@@ -921,7 +925,7 @@ function App() {
       Matter.World.clear(engine.world, false)
       Matter.Engine.clear(engine)
     }
-  }, [addFloater, registerCoins, stopHoldDrop])
+  }, [addFloater, mainTab, registerCoins, stopHoldDrop])
 
   useEffect(() => {
     if (!engineRef.current) {

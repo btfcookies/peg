@@ -47,6 +47,23 @@ Run `npm run dev` and `npm run server` in separate terminals during development.
 
 The frontend calls `/api/*` and is proxied to `http://localhost:3001` in development.
 
+### Global Persistent Mode (MongoDB Atlas)
+
+To make the leaderboard persistent globally (shared by all users and not tied to one local machine), run the server with a hosted MongoDB database:
+
+1. Create a MongoDB Atlas cluster and database user.
+2. Add your app host/IP to Atlas network access.
+3. Set environment variable `MONGODB_URI` before starting the server.
+
+PowerShell example:
+
+```powershell
+$env:MONGODB_URI="mongodb+srv://<user>:<password>@<cluster>/<db>?retryWrites=true&w=majority"
+npm run server
+```
+
+If `MONGODB_URI` is not set, the server falls back to local file storage (`server/data/leaderboard.json`).
+
 ### Build for Production
 
 ```bash
@@ -103,8 +120,14 @@ Submission payload fields used by the app:
 
 Data persistence:
 
-- Stored at `server/data/leaderboard.json`
+- Global mode: MongoDB Atlas (`MONGODB_URI`)
+- Local fallback: `server/data/leaderboard.json`
 - Entries are updated by username (case-insensitive)
+
+Health endpoint output includes storage mode:
+
+- `storage: "mongo"` for globally persistent mode
+- `storage: "file"` for local fallback mode
 
 ## License
 MIT License
