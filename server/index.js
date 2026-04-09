@@ -323,8 +323,12 @@ app.post('/api/leaderboard/submit', async (req, res) => {
 
 async function initStorage() {
   if (MONGODB_URI) {
-    storage = await createMongoStorage(MONGODB_URI)
-    return
+    try {
+      storage = await createMongoStorage(MONGODB_URI)
+      return
+    } catch (error) {
+      console.error('MongoDB connection failed, falling back to file storage:', error.message)
+    }
   }
 
   storage = await createFileStorage()
