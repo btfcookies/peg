@@ -65,4 +65,4 @@ index.html
 - Ball count is capped by owned balls.
 
 ## License
-MIT Liscense
+MIT License
