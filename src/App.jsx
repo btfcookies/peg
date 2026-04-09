@@ -4,11 +4,6 @@ import './App.css'
 
 const SLOT_COUNT = 9
 const SLOT_BASE_REWARDS = [20, 12, 8, 5, 3, 5, 8, 12, 20]
-const BOARD_MAX_WIDTH = 800
-const BOARD_MIN_WIDTH = 460
-const BOARD_MAX_HEIGHT = 700
-const BOARD_MIN_HEIGHT = 430
-const GITHUB_URL = 'https://github.com/btfcookies/peg'
 
 const upgradeCatalog = [
   {
@@ -230,9 +225,8 @@ function App() {
     audioRef.current = createAudioEngine()
     audioRef.current?.setVolume(soundOn ? volume : 0)
 
-    const width = Math.min(BOARD_MAX_WIDTH, Math.max(BOARD_MIN_WIDTH, boardWrapRef.current.clientWidth))
-    const measuredHeight = boardWrapRef.current.clientHeight || BOARD_MAX_HEIGHT
-    const height = Math.min(BOARD_MAX_HEIGHT, Math.max(BOARD_MIN_HEIGHT, measuredHeight))
+    const width = Math.min(800, Math.max(500, boardWrapRef.current.clientWidth))
+    const height = 700
 
     const engine = Matter.Engine.create()
     engine.gravity.y = 0.86
@@ -388,13 +382,9 @@ function App() {
     Matter.Render.run(render)
 
     const resize = () => {
-      const newWidth = Math.min(BOARD_MAX_WIDTH, Math.max(BOARD_MIN_WIDTH, boardWrapRef.current?.clientWidth ?? BOARD_MAX_WIDTH))
-      const measuredHeight = boardWrapRef.current?.clientHeight ?? BOARD_MAX_HEIGHT
-      const newHeight = Math.min(BOARD_MAX_HEIGHT, Math.max(BOARD_MIN_HEIGHT, measuredHeight))
+      const newWidth = Math.min(800, Math.max(500, boardWrapRef.current?.clientWidth ?? 700))
       render.canvas.width = newWidth
       render.options.width = newWidth
-      render.canvas.height = newHeight
-      render.options.height = newHeight
     }
     window.addEventListener('resize', resize)
 
@@ -510,8 +500,19 @@ function App() {
               <span>Coins</span>
               <strong>{Math.floor(coins).toLocaleString()}</strong>
             </div>
-            <a className="github-btn" href={GITHUB_URL} target="_blank" rel="noreferrer" aria-label="Open GitHub">
-              GH
+            <a
+              className="github-btn"
+              href="https://github.com/btfcookies/peg"
+              target="_blank"
+              rel="noreferrer"
+              aria-label="Open GitHub repository"
+              title="GitHub"
+            >
+              <svg viewBox="0 0 24 24" aria-hidden="true" focusable="false">
+                <path
+                  d="M12 2C6.48 2 2 6.58 2 12.22c0 4.51 2.87 8.34 6.84 9.69.5.1.68-.22.68-.49 0-.24-.01-.88-.01-1.73-2.78.62-3.37-1.37-3.37-1.37-.45-1.18-1.11-1.49-1.11-1.49-.9-.63.07-.62.07-.62 1 .07 1.52 1.04 1.52 1.04.88 1.54 2.32 1.1 2.89.84.09-.66.34-1.1.62-1.35-2.22-.26-4.56-1.13-4.56-5.04 0-1.11.39-2.02 1.03-2.73-.1-.26-.45-1.31.1-2.74 0 0 .84-.27 2.75 1.04A9.36 9.36 0 0 1 12 7.07c.85 0 1.71.12 2.51.35 1.91-1.31 2.75-1.04 2.75-1.04.55 1.43.2 2.48.1 2.74.64.71 1.03 1.62 1.03 2.73 0 3.92-2.34 4.78-4.58 5.03.36.32.67.95.67 1.92 0 1.39-.01 2.51-.01 2.85 0 .27.18.6.69.49A10.22 10.22 0 0 0 22 12.22C22 6.58 17.52 2 12 2Z"
+                />
+              </svg>
             </a>
             <button
               className="settings-btn"

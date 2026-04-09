@@ -16,7 +16,6 @@
   display: flex;
   flex-direction: column;
   gap: 12px;
-  height: calc(100vh - 24px);
   overflow: hidden;
 }
 
@@ -34,17 +33,26 @@
 }
 
 .github-btn {
-  border: 2px solid #ffb700;
+  border: 2px solid #aac8ff;
   background: #0e0e0e;
-  color: #ffb700;
+  color: #aac8ff;
+  width: 40px;
+  height: 40px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
   text-decoration: none;
-  font: 400 1rem/1 'Press Start 2P', monospace;
-  padding: 8px 9px;
   transition: background 80ms, color 80ms;
 }
 
+.github-btn svg {
+  width: 22px;
+  height: 22px;
+  fill: currentColor;
+}
+
 .github-btn:hover {
-  background: #ffb700;
+  background: #aac8ff;
   color: #080808;
 }
 
@@ -250,8 +258,7 @@
   position: relative;
   width: 100%;
   flex: 1;
-  min-height: 0;
-  height: 100%;
+  min-height: 700px;
   border: 2px solid #00ff4133;
   background: #080808;
   overflow: hidden;
@@ -259,7 +266,7 @@
 
 .board-wrap canvas {
   width: 100%;
-  height: 100%;
+  height: 700px;
   display: block;
 }
 
@@ -500,7 +507,6 @@
 
   .main-panel {
     order: 1;
-    height: auto;
   }
 
   .sidebar {
@@ -533,11 +539,11 @@
   }
 
   .board-wrap {
-    min-height: clamp(460px, 64vh, 600px);
+    min-height: 600px;
   }
 
   .board-wrap canvas {
-    height: clamp(460px, 64vh, 600px);
+    height: 600px;
   }
 
   .slot-card strong {
