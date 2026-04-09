@@ -56,6 +56,48 @@ const upgradeCatalog = [
   },
 ]
 
+const skinCatalog = [
+  {
+    id: 'default',
+    name: 'Default Core',
+    description: 'Classic cyan shell tuned for clean visibility.',
+    price: 0,
+  },
+  {
+    id: 'ember',
+    name: 'Ember Coil',
+    description: 'Molten orange alloy with a hot neon edge.',
+    price: 1500,
+  },
+  {
+    id: 'frostbyte',
+    name: 'Frostbyte',
+    description: 'Cold electric blue with icy contrast.',
+    price: 6000,
+  },
+  {
+    id: 'verdant',
+    name: 'Verdant Flux',
+    description: 'Bio-neon green shell with deep shadow core.',
+    price: 18000,
+  },
+  {
+    id: 'voidsteel',
+    name: 'Voidsteel',
+    description: 'Dark alloy orb with sharpened silver trim.',
+    price: 42000,
+  },
+  {
+    id: 'prisma',
+    name: 'Prisma',
+    description: 'Neon rainbow prototype that cycles color energy.',
+    price: 100000,
+  },
+]
+
+const SKIN_IDS = new Set(skinCatalog.map((skin) => skin.id))
+const DEFAULT_SKIN_ID = 'default'
+
 const UPGRADE_DEFAULTS = {
   ballsPerDrop: 1,
   gravityLevel: 1,
@@ -106,6 +148,69 @@ function getPegRenderStyle(pegLevel) {
   }
 }
 
+function getBallRenderStyle(skinId, fallbackHue, frenzyActive) {
+  if (frenzyActive) {
+    return {
+      fillStyle: '#ffe66e',
+      strokeStyle: '#132318',
+      lineWidth: 2,
+    }
+  }
+
+  switch (skinId) {
+    case 'ember':
+      return {
+        fillStyle: '#ff8a3b',
+        strokeStyle: '#ffd2a8',
+        lineWidth: 2,
+      }
+    case 'frostbyte':
+      return {
+        fillStyle: '#58c9ff',
+        strokeStyle: '#d8f3ff',
+        lineWidth: 2,
+      }
+    case 'verdant':
+      return {
+        fillStyle: '#5db45f',
+        strokeStyle: '#d9ffd8',
+        lineWidth: 2,
+      }
+    case 'voidsteel':
+      return {
+        fillStyle: '#4f5966',
+        strokeStyle: '#ffffff',
+        lineWidth: 2.4,
+      }
+    case 'prisma': {
+      return {
+        fillStyle: '#d95aff',
+        strokeStyle: '#ffffff',
+        lineWidth: 2.2,
+      }
+    }
+    default:
+      return {
+        fillStyle: `hsl(${fallbackHue} 92% 66%)`,
+        strokeStyle: '#132318',
+        lineWidth: 2,
+      }
+  }
+}
+
+function drawBallPolygonPath(ctx, body) {
+  const vertices = body.vertices
+  if (!vertices || vertices.length === 0) {
+    return
+  }
+  ctx.beginPath()
+  ctx.moveTo(vertices[0].x, vertices[0].y)
+  for (let i = 1; i < vertices.length; i += 1) {
+    ctx.lineTo(vertices[i].x, vertices[i].y)
+  }
+  ctx.closePath()
+}
+
 function countLiveBalls(world) {
   return world.bodies.reduce((count, body) => count + (body.label === 'ball' ? 1 : 0), 0)
 }
@@ -142,6 +247,22 @@ function normalizeUpgrades(raw) {
   return next
 }
 
+function normalizeOwnedSkins(raw) {
+  const values = Array.isArray(raw) ? raw.filter((entry) => typeof entry === 'string' && SKIN_IDS.has(entry)) : []
+  const unique = [...new Set(values)]
+  if (!unique.includes(DEFAULT_SKIN_ID)) {
+    unique.unshift(DEFAULT_SKIN_ID)
+  }
+  return unique
+}
+
+function normalizeSelectedSkin(raw, ownedSkins) {
+  if (typeof raw === 'string' && SKIN_IDS.has(raw) && ownedSkins.includes(raw)) {
+    return raw
+  }
+  return DEFAULT_SKIN_ID
+}
+
 function defaultProgress() {
   return {
     coins: 40,
@@ -151,6 +272,8 @@ function defaultProgress() {
     upgrades: { ...UPGRADE_DEFAULTS },
     slotLevels: Array.from({ length: SLOT_COUNT }, () => 1),
     slotFill: Array.from({ length: SLOT_COUNT }, () => 0),
+    ownedSkins: [DEFAULT_SKIN_ID],
+    selectedSkin: DEFAULT_SKIN_ID,
     soundOn: true,
     volume: 0.18,
   }
@@ -168,6 +291,7 @@ function loadProgress() {
       return fallback
     }
     const parsed = JSON.parse(stored)
+    const ownedSkins = normalizeOwnedSkins(parsed?.ownedSkins)
     return {
       coins: clampNumber(parsed?.coins, 0, Number.MAX_SAFE_INTEGER, fallback.coins),
       totalCoins: clampNumber(parsed?.totalCoins, 0, Number.MAX_SAFE_INTEGER, fallback.totalCoins),
@@ -176,6 +300,8 @@ function loadProgress() {
       upgrades: normalizeUpgrades(parsed?.upgrades),
       slotLevels: normalizeArray(parsed?.slotLevels, SLOT_COUNT, 1, 9999, 1),
       slotFill: normalizeArray(parsed?.slotFill, SLOT_COUNT, 0, 999999, 0),
+      ownedSkins,
+      selectedSkin: normalizeSelectedSkin(parsed?.selectedSkin, ownedSkins),
       soundOn: typeof parsed?.soundOn === 'boolean' ? parsed.soundOn : fallback.soundOn,
       volume: clampNumber(parsed?.volume, 0, 1, fallback.volume),
     }
@@ -220,8 +346,11 @@ function createAudioEngine() {
       tone({ frequency: root * 1.5, type: 'triangle', duration: 0.2, gain: 0.06 })
     },
     buy: () => {
-      tone({ frequency: 420, type: 'square', duration: 0.08, gain: 0.07 })
-      tone({ frequency: 610, type: 'triangle', duration: 0.12, gain: 0.08 })
+      // Cash-register inspired ka-ching: quick drawer thunk + bright stacked chimes.
+      tone({ frequency: 180, type: 'square', duration: 0.06, gain: 0.12 })
+      window.setTimeout(() => tone({ frequency: 900, type: 'triangle', duration: 0.1, gain: 0.11 }), 16)
+      window.setTimeout(() => tone({ frequency: 1280, type: 'triangle', duration: 0.14, gain: 0.1 }), 32)
+      window.setTimeout(() => tone({ frequency: 1700, type: 'sine', duration: 0.16, gain: 0.08 }), 52)
     },
     fail: () => tone({ frequency: 140, type: 'sawtooth', duration: 0.1, gain: 0.06 }),
     frenzy: () => {
@@ -258,8 +387,11 @@ function App() {
   const [frenzyUntil, setFrenzyUntil] = useState(initialProgress.frenzyUntil)
   const [floaters, setFloaters] = useState([])
   const [showSettings, setShowSettings] = useState(false)
+  const [shopTab, setShopTab] = useState('upgrades')
   const [soundOn, setSoundOn] = useState(initialProgress.soundOn)
   const [volume, setVolume] = useState(initialProgress.volume)
+  const [ownedSkins, setOwnedSkins] = useState(initialProgress.ownedSkins)
+  const [selectedSkin, setSelectedSkin] = useState(initialProgress.selectedSkin)
 
   const [upgrades, setUpgrades] = useState(initialProgress.upgrades)
 
@@ -284,6 +416,8 @@ function App() {
       upgrades,
       slotLevels,
       slotFill,
+      ownedSkins,
+      selectedSkin,
       soundOn,
       volume,
     }
@@ -292,7 +426,7 @@ function App() {
     } catch {
       // Ignore storage write errors and continue gameplay.
     }
-  }, [coins, totalCoins, totalBalls, frenzyUntil, upgrades, slotLevels, slotFill, soundOn, volume])
+  }, [coins, totalCoins, totalBalls, frenzyUntil, upgrades, slotLevels, slotFill, ownedSkins, selectedSkin, soundOn, volume])
 
   const addFloater = useCallback((x, y, text, kind = 'coin') => {
     const id = window.crypto.randomUUID()
@@ -337,20 +471,20 @@ function App() {
     const width = engine.render?.options?.width ?? 760
     const xCenter = width / 2
     const hue = 175 + Math.floor(Math.random() * 90)
+    const ballRenderStyle = getBallRenderStyle(selectedSkin, hue, frenzyActive)
     const ball = Matter.Bodies.polygon(xCenter + (Math.random() - 0.5) * 24, 32, 8, 8.8, {
       restitution: 0.6,
       friction: 0.004,
       frictionAir: 0.0015,
       density: 0.0018,
       label: 'ball',
-      render: {
-        fillStyle: frenzyActive ? '#ffe66e' : `hsl(${hue} 92% 66%)`,
-        strokeStyle: '#132318',
-        lineWidth: 2,
-      },
+      render: ballRenderStyle,
       plugin: {
         intensity,
         createdAt: Date.now(),
+        skinId: selectedSkin,
+        frenzyBall: frenzyActive,
+        gradientSeed: Math.random(),
       },
     })
 
@@ -358,7 +492,7 @@ function App() {
     const nextCount = countLiveBalls(engine.world)
     stateRef.current.activeBalls = nextCount
     setActiveBalls((previous) => (previous === nextCount ? previous : nextCount))
-  }, [frenzyActive])
+  }, [frenzyActive, selectedSkin])
 
   const dropBallWave = useCallback(() => {
     const count = stateRef.current.upgrades.ballsPerDrop + (frenzyActive ? 1 : 0)
@@ -581,6 +715,86 @@ function App() {
     const runner = Matter.Runner.create()
     runnerRef.current = runner
 
+    const drawSkinOverlays = () => {
+      const ctx = render.context
+      const now = performance.now()
+
+      for (const body of engine.world.bodies) {
+        if (body.label !== 'ball' || body.plugin?.frenzyBall) {
+          continue
+        }
+
+        const skinId = body.plugin?.skinId
+        if (skinId !== 'prisma' && skinId !== 'verdant' && skinId !== 'voidsteel') {
+          continue
+        }
+
+        const seed = body.plugin?.gradientSeed ?? 0
+
+        if (skinId === 'prisma' || skinId === 'verdant') {
+          const angle = (now * 0.0017 + seed * Math.PI * 2) % (Math.PI * 2)
+          const x1 = body.position.x + Math.cos(angle) * 10
+          const y1 = body.position.y + Math.sin(angle) * 10
+          const x2 = body.position.x - Math.cos(angle) * 10
+          const y2 = body.position.y - Math.sin(angle) * 10
+          const gradient = ctx.createLinearGradient(x1, y1, x2, y2)
+
+          if (skinId === 'prisma') {
+            gradient.addColorStop(0, '#ff4bc8')
+            gradient.addColorStop(0.25, '#ffbf47')
+            gradient.addColorStop(0.5, '#84ff55')
+            gradient.addColorStop(0.75, '#5ce5ff')
+            gradient.addColorStop(1, '#b97cff')
+          } else {
+            gradient.addColorStop(0, '#dcffd8')
+            gradient.addColorStop(0.45, '#59e86b')
+            gradient.addColorStop(1, '#1f8f34')
+          }
+
+          ctx.save()
+          drawBallPolygonPath(ctx, body)
+          ctx.fillStyle = gradient
+          ctx.fill()
+          ctx.restore()
+        }
+
+        if (skinId === 'voidsteel') {
+          ctx.save()
+          drawBallPolygonPath(ctx, body)
+          ctx.lineWidth = 3
+          ctx.strokeStyle = '#ffffff'
+          ctx.shadowBlur = 12
+          ctx.shadowColor = '#ffffff'
+          ctx.stroke()
+          ctx.restore()
+        }
+
+        if (skinId === 'prisma') {
+          ctx.save()
+          drawBallPolygonPath(ctx, body)
+          ctx.lineWidth = 2.6
+          ctx.strokeStyle = '#ffffff'
+          ctx.shadowBlur = 10
+          ctx.shadowColor = '#fff2a6'
+          ctx.stroke()
+          ctx.restore()
+        }
+
+        if (skinId === 'verdant') {
+          ctx.save()
+          drawBallPolygonPath(ctx, body)
+          ctx.lineWidth = 2.4
+          ctx.strokeStyle = '#dcffd8'
+          ctx.shadowBlur = 8
+          ctx.shadowColor = '#89ff8a'
+          ctx.stroke()
+          ctx.restore()
+        }
+      }
+    }
+
+    Matter.Events.on(render, 'afterRender', drawSkinOverlays)
+
     Matter.Runner.run(runner, engine)
     Matter.Render.run(render)
 
@@ -624,6 +838,7 @@ function App() {
       window.clearInterval(cleanupInterval)
       stopHoldDrop()
       window.removeEventListener('resize', resize)
+      Matter.Events.off(render, 'afterRender', drawSkinOverlays)
       Matter.Render.stop(render)
       Matter.Runner.stop(runner)
       Matter.World.clear(engine.world, false)
@@ -725,6 +940,32 @@ function App() {
       }
     },
     [coins, getUpgradeCost, upgrades],
+  )
+
+  const buyOrEquipSkin = useCallback(
+    (skinId) => {
+      const skin = skinCatalog.find((entry) => entry.id === skinId)
+      if (!skin) {
+        return
+      }
+
+      if (ownedSkins.includes(skinId)) {
+        setSelectedSkin(skinId)
+        audioRef.current?.buy()
+        return
+      }
+
+      if (coins < skin.price) {
+        audioRef.current?.fail()
+        return
+      }
+
+      setCoins((value) => value - skin.price)
+      setOwnedSkins((previous) => [...previous, skinId])
+      setSelectedSkin(skinId)
+      audioRef.current?.buy()
+    },
+    [coins, ownedSkins],
   )
 
   useEffect(() => {
@@ -849,41 +1090,92 @@ function App() {
       </section>
 
       <aside className="sidebar">
-        <h2>Upgrades</h2>
-        <p className="sidebar-note">Spend coins to bend physics and snowball payouts.</p>
-        <div className="upgrade-list">
-          <article className="upgrade-card">
-            <div>
-              <h3>Buy Ball</h3>
-              <p>Add one more ball to your total — all {totalBalls + 1} can be in play at once.</p>
-            </div>
-            <div className="upgrade-meta">
-              <span>{totalBalls} owned</span>
-              <button disabled={coins < Math.floor(18 * 1.6 ** (totalBalls - 3))} onClick={buyBall}>
-                Buy • {Math.floor(18 * 1.6 ** (totalBalls - 3))}
-              </button>
-            </div>
-          </article>
-          {upgradeCatalog.map((upgrade) => {
-            const level = upgrades[upgrade.id]
-            const cost = getUpgradeCost(upgrade.id, level + 1)
-            const isMaxed = level >= upgrade.maxLevel
-            return (
-              <article key={upgrade.id} className={`upgrade-card ${upgrade.id === 'frenzyLevel' ? 'rare' : ''} ${isMaxed ? 'maxed' : ''}`}>
+        <h2>Shop</h2>
+        <div className="shop-tabs" role="tablist" aria-label="Shop sections">
+          <button
+            className={`shop-tab ${shopTab === 'upgrades' ? 'active' : ''}`}
+            onClick={() => setShopTab('upgrades')}
+            role="tab"
+            aria-selected={shopTab === 'upgrades'}
+          >
+            Upgrades
+          </button>
+          <button
+            className={`shop-tab ${shopTab === 'skins' ? 'active' : ''}`}
+            onClick={() => setShopTab('skins')}
+            role="tab"
+            aria-selected={shopTab === 'skins'}
+          >
+            Skins
+          </button>
+        </div>
+
+        {shopTab === 'upgrades' ? (
+          <>
+            <p className="sidebar-note">Spend coins to bend physics and snowball payouts.</p>
+            <div className="upgrade-list">
+              <article className="upgrade-card">
                 <div>
-                  <h3>{upgrade.title}</h3>
-                  <p>{upgrade.description}</p>
+                  <h3>Buy Ball</h3>
+                  <p>Add one more ball to your total — all {totalBalls + 1} can be in play at once.</p>
                 </div>
                 <div className="upgrade-meta">
-                  <span>Lv {level}/{upgrade.maxLevel}</span>
-                  <button disabled={isMaxed || coins < cost} onClick={() => buyUpgrade(upgrade.id)}>
-                    {isMaxed ? 'MAX' : `Buy • ${cost}`}
+                  <span>{totalBalls} owned</span>
+                  <button disabled={coins < Math.floor(18 * 1.6 ** (totalBalls - 3))} onClick={buyBall}>
+                    Buy • {Math.floor(18 * 1.6 ** (totalBalls - 3))}
                   </button>
                 </div>
               </article>
-            )
-          })}
-        </div>
+              {upgradeCatalog.map((upgrade) => {
+                const level = upgrades[upgrade.id]
+                const cost = getUpgradeCost(upgrade.id, level + 1)
+                const isMaxed = level >= upgrade.maxLevel
+                return (
+                  <article key={upgrade.id} className={`upgrade-card ${upgrade.id === 'frenzyLevel' ? 'rare' : ''} ${isMaxed ? 'maxed' : ''}`}>
+                    <div>
+                      <h3>{upgrade.title}</h3>
+                      <p>{upgrade.description}</p>
+                    </div>
+                    <div className="upgrade-meta">
+                      <span>Lv {level}/{upgrade.maxLevel}</span>
+                      <button disabled={isMaxed || coins < cost} onClick={() => buyUpgrade(upgrade.id)}>
+                        {isMaxed ? 'MAX' : `Buy • ${cost}`}
+                      </button>
+                    </div>
+                  </article>
+                )
+              })}
+            </div>
+          </>
+        ) : (
+          <>
+            <p className="sidebar-note">Unlock and equip ball skins. Prisma is the top-tier neon rainbow core.</p>
+            <div className="upgrade-list skin-list">
+              {skinCatalog.map((skin) => {
+                const isOwned = ownedSkins.includes(skin.id)
+                const isSelected = selectedSkin === skin.id
+                return (
+                  <article key={skin.id} className={`upgrade-card skin-card ${skin.id === 'prisma' ? 'prisma' : ''} ${isSelected ? 'selected' : ''}`}>
+                    <div className="skin-header">
+                      <span className={`skin-preview ${skin.id}`} aria-hidden="true" />
+                      <h3>{skin.name}</h3>
+                    </div>
+                    <p>{skin.description}</p>
+                    <div className="upgrade-meta">
+                      <span>{skin.price === 0 ? 'Free' : `${skin.price.toLocaleString()} coins`}</span>
+                      <button
+                        disabled={!isOwned && coins < skin.price}
+                        onClick={() => buyOrEquipSkin(skin.id)}
+                      >
+                        {isSelected ? 'EQUIPPED' : isOwned ? 'Equip' : `Buy • ${skin.price}`}
+                      </button>
+                    </div>
+                  </article>
+                )
+              })}
+            </div>
+          </>
+        )}
       </aside>
     </main>
   )
