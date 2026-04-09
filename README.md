@@ -55,6 +55,28 @@ To make the leaderboard persistent globally (shared by all users and not tied to
 2. Add your app host/IP to Atlas network access.
 3. Set environment variable `MONGODB_URI` before starting the server.
 
+Recommended local setup:
+
+1. Create a `.env` file in the project root.
+2. Add your Atlas URI:
+
+```env
+MONGODB_URI="mongodb+srv://<username>:<password>@<cluster>/<database>?retryWrites=true&w=majority"
+```
+
+3. Load it in your terminal session before running the server (PowerShell):
+
+```powershell
+Get-Content .env | ForEach-Object {
+	if ($_ -match '^\s*#' -or $_ -match '^\s*$') { return }
+	$name, $value = $_ -split '=', 2
+	$env:$name = $value.Trim('"')
+}
+npm run server
+```
+
+`.env` is ignored by git in `.gitignore`.
+
 PowerShell example:
 
 ```powershell
