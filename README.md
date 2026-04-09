@@ -65,5 +65,4 @@ index.html
 - Ball count is capped by owned balls.
 
 ## License
-
-No license file has been added yet. Add one if you plan to distribute this project.
+MIT Liscense
