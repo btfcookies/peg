@@ -11,6 +11,10 @@ const DATA_DIR = path.join(__dirname, 'data')
 const LEADERBOARD_FILE = path.join(DATA_DIR, 'leaderboard.json')
 const PORT = Number(process.env.PORT) || 3001
 const MONGODB_URI = process.env.MONGODB_URI?.trim()
+const CORS_ORIGINS = (process.env.CORS_ORIGINS ?? '')
+  .split(',')
+  .map((origin) => origin.trim())
+  .filter(Boolean)
 
 const USERNAME_PATTERN = /^[a-zA-Z0-9 _-]{3,20}$/
 
@@ -250,7 +254,31 @@ async function createMongoStorage(uri) {
 const app = express()
 let storage
 
-app.use(cors())
+const allowedOrigins = new Set([
+  'http://localhost:5173',
+  'http://127.0.0.1:5173',
+  'https://peg-1.netlify.app',
+  ...CORS_ORIGINS,
+])
+
+const corsOptions = {
+  origin(origin, callback) {
+    // Allow same-origin/non-browser requests with no Origin header.
+    if (!origin) {
+      callback(null, true)
+      return
+    }
+    if (allowedOrigins.has(origin)) {
+      callback(null, true)
+      return
+    }
+    callback(new Error(`CORS blocked for origin: ${origin}`))
+  },
+  methods: ['GET', 'POST', 'OPTIONS'],
+}
+
+app.use(cors(corsOptions))
+app.options('*', cors(corsOptions))
 app.use(express.json({ limit: '500kb' }))
 
 app.get('/', (_req, res) => {
