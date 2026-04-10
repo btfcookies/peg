@@ -435,6 +435,9 @@ function App() {
   const [leaderboardError, setLeaderboardError] = useState('')
   const [leaderboardSubmitStatus, setLeaderboardSubmitStatus] = useState('')
   const [leaderboardSubmitting, setLeaderboardSubmitting] = useState(false)
+  const [leaderboardCountdown, setLeaderboardCountdown] = useState(Math.ceil(LEADERBOARD_REFRESH_MS / 1000))
+  const [leaderboardLastSyncAt, setLeaderboardLastSyncAt] = useState(null)
+  const [leaderboardLastSyncOk, setLeaderboardLastSyncOk] = useState(null)
   const [selectedLeaderboardPlayer, setSelectedLeaderboardPlayer] = useState(null)
   const [leaderboardUsername, setLeaderboardUsername] = useState(() => {
     if (typeof window === 'undefined') {
@@ -467,6 +470,7 @@ function App() {
   const [slotFill, setSlotFill] = useState(initialProgress.slotFill)
 
   const stateRef = useRef({ upgrades, slotLevels, slotFill, totalBalls, activeBalls: 0 })
+  const nextLeaderboardRefreshAtRef = useRef(Date.now() + LEADERBOARD_REFRESH_MS)
 
   useEffect(() => {
     stateRef.current = { ...stateRef.current, upgrades, slotLevels, slotFill, totalBalls }
@@ -506,7 +510,13 @@ function App() {
     }
   }, [leaderboardUsername])
 
-  const refreshLeaderboard = useCallback(async () => {
+  const refreshLeaderboard = useCallback(async (reason = 'interval') => {
+    const startedAt = Date.now()
+    console.log(`[leaderboard] refresh start (${reason})`, {
+      url: apiUrl(`/api/leaderboard?limit=${LEADERBOARD_LIMIT}`),
+      startedAt,
+    })
+
     setLeaderboardLoading(true)
     setLeaderboardError('')
     try {
@@ -519,28 +529,63 @@ function App() {
       const data = await response.json()
       const entries = Array.isArray(data?.entries) ? data.entries : []
       setLeaderboardEntries(entries)
+      setLeaderboardLastSyncAt(Date.now())
+      setLeaderboardLastSyncOk(true)
       setSelectedLeaderboardPlayer((previous) => {
         if (!previous) {
           return entries[0] ?? null
         }
         return entries.find((entry) => entry.username === previous.username) ?? entries[0] ?? null
       })
+      console.log('[leaderboard] refresh success', {
+        reason,
+        status: response.status,
+        durationMs: Date.now() - startedAt,
+        entries: entries.length,
+        topPlayer: entries[0]?.username ?? null,
+        topCoins: entries[0]?.coins ?? null,
+      })
     } catch {
       setLeaderboardError('Leaderboard unavailable. Set VITE_API_BASE_URL to your deployed backend URL.')
+      setLeaderboardLastSyncAt(Date.now())
+      setLeaderboardLastSyncOk(false)
+      console.error('[leaderboard] refresh failed', {
+        reason,
+        durationMs: Date.now() - startedAt,
+      })
     } finally {
       setLeaderboardLoading(false)
     }
   }, [])
 
+  const scheduleNextLeaderboardRefresh = useCallback(() => {
+    const nextAt = Date.now() + LEADERBOARD_REFRESH_MS
+    nextLeaderboardRefreshAtRef.current = nextAt
+    setLeaderboardCountdown(Math.max(0, Math.ceil((nextAt - Date.now()) / 1000)))
+  }, [])
+
   useEffect(() => {
-    refreshLeaderboard()
+    scheduleNextLeaderboardRefresh()
+    refreshLeaderboard('initial')
     const intervalId = window.setInterval(() => {
-      refreshLeaderboard()
+      scheduleNextLeaderboardRefresh()
+      refreshLeaderboard('interval')
     }, LEADERBOARD_REFRESH_MS)
     return () => {
       window.clearInterval(intervalId)
     }
-  }, [refreshLeaderboard])
+  }, [refreshLeaderboard, scheduleNextLeaderboardRefresh])
+
+  useEffect(() => {
+    const tickerId = window.setInterval(() => {
+      const remainingMs = Math.max(0, nextLeaderboardRefreshAtRef.current - Date.now())
+      setLeaderboardCountdown(Math.ceil(remainingMs / 1000))
+    }, 250)
+
+    return () => {
+      window.clearInterval(tickerId)
+    }
+  }, [])
 
   const submitLeaderboardScore = useCallback(async () => {
     const username = leaderboardUsername.trim()
@@ -587,13 +632,14 @@ function App() {
         setSelectedLeaderboardPlayer({ ...data.player, rank: data.rank })
       }
       setLeaderboardSubmitStatus(`Submitted! Current rank: #${data.rank}`)
-      await refreshLeaderboard()
+      scheduleNextLeaderboardRefresh()
+      await refreshLeaderboard('submit')
     } catch {
       setLeaderboardSubmitStatus('Submission failed. Check backend URL and CORS settings.')
     } finally {
       setLeaderboardSubmitting(false)
     }
-  }, [coins, leaderboardUsername, ownedSkins, refreshLeaderboard, selectedSkin, slotLevels, totalBalls, totalCoins, upgrades])
+  }, [coins, leaderboardUsername, ownedSkins, refreshLeaderboard, scheduleNextLeaderboardRefresh, selectedSkin, slotLevels, totalBalls, totalCoins, upgrades])
 
   const addFloater = useCallback((x, y, text, kind = 'coin') => {
     const id = window.crypto.randomUUID()
@@ -1446,6 +1492,12 @@ function App() {
                 </article>
               )}
             </div>
+            <p className="sidebar-note">
+              Next refresh in {leaderboardCountdown}s
+              {leaderboardLastSyncAt
+                ? ` • Last sync ${leaderboardLastSyncOk ? 'ok' : 'failed'} at ${new Date(leaderboardLastSyncAt).toLocaleTimeString()}`
+                : ''}
+            </p>
           </section>
         )}
       </section>
