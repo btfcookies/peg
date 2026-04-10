@@ -121,6 +121,7 @@ const SAVE_STORAGE_KEY = 'peg-progress-v1'
 const LEADERBOARD_USERNAME_KEY = 'peg-leaderboard-username-v1'
 const LEADERBOARD_COMMITTED_USERNAME_KEY = 'peg-leaderboard-committed-username-v1'
 const LEADERBOARD_LIMIT = 50
+const LEADERBOARD_REFRESH_MS = 10000
 const API_BASE_URL = (import.meta.env.VITE_API_BASE_URL ?? '').trim().replace(/\/$/, '')
 
 function apiUrl(path) {
@@ -509,7 +510,9 @@ function App() {
     setLeaderboardLoading(true)
     setLeaderboardError('')
     try {
-      const response = await fetch(apiUrl(`/api/leaderboard?limit=${LEADERBOARD_LIMIT}`))
+      const response = await fetch(apiUrl(`/api/leaderboard?limit=${LEADERBOARD_LIMIT}&t=${Date.now()}`), {
+        cache: 'no-store',
+      })
       if (!response.ok) {
         throw new Error('Could not load leaderboard.')
       }
@@ -533,7 +536,7 @@ function App() {
     refreshLeaderboard()
     const intervalId = window.setInterval(() => {
       refreshLeaderboard()
-    }, 15000)
+    }, LEADERBOARD_REFRESH_MS)
     return () => {
       window.clearInterval(intervalId)
     }
