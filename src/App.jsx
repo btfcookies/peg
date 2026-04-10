@@ -12,7 +12,7 @@ const upgradeCatalog = [
     description: 'Drop one extra ball per launch.',
     baseCost: 28,
     growth: 1.55,
-    maxLevel: 9,
+    maxLevel: 20,
   },
   {
     id: 'gravityLevel',
@@ -20,7 +20,7 @@ const upgradeCatalog = [
     description: 'Increase board gravity so balls drop faster.',
     baseCost: 35,
     growth: 1.65,
-    maxLevel: 8,
+    maxLevel: 20,
   },
   {
     id: 'pegLevel',
@@ -28,7 +28,7 @@ const upgradeCatalog = [
     description: 'Each level increases peg payout by 50%.',
     baseCost: 40,
     growth: 1.75,
-    maxLevel: 12,
+    maxLevel: 20,
   },
   {
     id: 'rainbowLevel',
@@ -36,7 +36,7 @@ const upgradeCatalog = [
     description: 'Each level: +10% peg coin chance and unlocks neon gold coin text.',
     baseCost: 44,
     growth: 1.75,
-    maxLevel: 8,
+    maxLevel: 20,
   },
   {
     id: 'slotGlobalLevel',
@@ -44,7 +44,15 @@ const upgradeCatalog = [
     description: 'Multiply every slot payout.',
     baseCost: 55,
     growth: 1.8,
-    maxLevel: 10,
+    maxLevel: 20,
+  },
+  {
+    id: 'gatekeeperLevel',
+    title: 'Gatekeeper',
+    description: 'Adds a neon blue deflector just above the slots that bounces balls back into play. Each level adds another gatekeeper.',
+    baseCost: 25000,
+    growth: 1.9,
+    maxLevel: 15,
   },
 ]
 
@@ -96,6 +104,7 @@ const UPGRADE_DEFAULTS = {
   pegLevel: 1,
   rainbowLevel: 0,
   slotGlobalLevel: 1,
+  gatekeeperLevel: 0,
 }
 
 const UPGRADE_MIN_LEVELS = {
@@ -104,11 +113,13 @@ const UPGRADE_MIN_LEVELS = {
   pegLevel: 1,
   rainbowLevel: 0,
   slotGlobalLevel: 1,
+  gatekeeperLevel: 0,
 }
 
 const UPGRADE_MAX_LEVELS = Object.fromEntries(upgradeCatalog.map((upgrade) => [upgrade.id, upgrade.maxLevel]))
 const SAVE_STORAGE_KEY = 'peg-progress-v1'
 const LEADERBOARD_USERNAME_KEY = 'peg-leaderboard-username-v1'
+const LEADERBOARD_COMMITTED_USERNAME_KEY = 'peg-leaderboard-committed-username-v1'
 const LEADERBOARD_LIMIT = 50
 const API_BASE_URL = (import.meta.env.VITE_API_BASE_URL ?? '').trim().replace(/\/$/, '')
 
@@ -199,6 +210,47 @@ function drawBallPolygonPath(ctx, body) {
     ctx.lineTo(vertices[i].x, vertices[i].y)
   }
   ctx.closePath()
+}
+
+function ctxRoundRect(ctx, x, y, w, h, r) {
+  ctx.beginPath()
+  ctx.moveTo(x + r, y)
+  ctx.lineTo(x + w - r, y)
+  ctx.arcTo(x + w, y, x + w, y + r, r)
+  ctx.lineTo(x + w, y + h - r)
+  ctx.arcTo(x + w, y + h, x + w - r, y + h, r)
+  ctx.lineTo(x + r, y + h)
+  ctx.arcTo(x, y + h, x, y + h - r, r)
+  ctx.lineTo(x, y + r)
+  ctx.arcTo(x, y, x + r, y, r)
+  ctx.closePath()
+}
+
+function createGatekeeperBodies(count, width, slotAreaTop) {
+  if (count === 0) return []
+  const h = 14
+  const w = Math.max(40, Math.min(80, width / count - 8))
+  const bodies = []
+  for (let i = 0; i < count; i += 1) {
+    const phase = (i / Math.max(1, count)) * Math.PI * 2
+    const body = Matter.Bodies.rectangle(
+      ((i + 0.5) / count) * width,
+      slotAreaTop - 28,
+      w,
+      h,
+      {
+        isStatic: true,
+        restitution: 1.05,
+        friction: 0,
+        frictionAir: 0,
+        label: 'gatekeeper',
+        render: { visible: false },
+        plugin: { index: i, total: count, phase, baseW: w },
+      },
+    )
+    bodies.push(body)
+  }
+  return bodies
 }
 
 function countLiveBalls(world) {
@@ -327,7 +379,12 @@ function createAudioEngine() {
   }
 
   return {
-    peg: () => tone({ frequency: 410 + Math.random() * 80, type: 'triangle', duration: 0.07, gain: 0.48 }),
+    peg: () => {
+      const base = 470 + Math.random() * 70
+      tone({ frequency: base, type: 'triangle', duration: 0.06, gain: 0.34 })
+      window.setTimeout(() => tone({ frequency: base * 0.78, type: 'sine', duration: 0.12, gain: 0.12 }), 55)
+      window.setTimeout(() => tone({ frequency: base * 0.62, type: 'sine', duration: 0.17, gain: 0.07 }), 115)
+    },
     slot: (slotIndex) => {
       const root = 220 + slotIndex * 15
       tone({ frequency: root, type: 'sine', duration: 0.18, gain: 0.08 })
@@ -358,6 +415,7 @@ function App() {
   const audioRef = useRef(null)
   const spawnIntervalRef = useRef(null)
   const holdDropIntervalRef = useRef(null)
+  const gatekeeperBodiesRef = useRef([])
 
   const initialProgress = useMemo(() => loadProgress(), [])
 
@@ -383,6 +441,16 @@ function App() {
     }
     try {
       return window.localStorage.getItem(LEADERBOARD_USERNAME_KEY) ?? ''
+    } catch {
+      return ''
+    }
+  })
+  const [committedUsername, setCommittedUsername] = useState(() => {
+    if (typeof window === 'undefined') {
+      return ''
+    }
+    try {
+      return window.localStorage.getItem(LEADERBOARD_COMMITTED_USERNAME_KEY) ?? ''
     } catch {
       return ''
     }
@@ -506,6 +574,15 @@ function App() {
         return
       }
 
+      setCommittedUsername(username)
+      try {
+        window.localStorage.setItem(LEADERBOARD_COMMITTED_USERNAME_KEY, username)
+      } catch {
+        // Ignore storage failures.
+      }
+      if (data.player) {
+        setSelectedLeaderboardPlayer({ ...data.player, rank: data.rank })
+      }
       setLeaderboardSubmitStatus(`Submitted! Current rank: #${data.rank}`)
       await refreshLeaderboard()
     } catch {
@@ -650,7 +727,7 @@ function App() {
     const slotAreaTop = height - 168
 
     const engine = Matter.Engine.create()
-    engine.gravity.y = 0.86
+    engine.gravity.y = 0.48
     engineRef.current = engine
 
     const render = Matter.Render.create({
@@ -730,6 +807,12 @@ function App() {
 
     Matter.World.add(engine.world, [...sideWalls, ...pegs, ...separators, ...sensors])
 
+    const initialGatekeepers = createGatekeeperBodies(stateRef.current.upgrades.gatekeeperLevel, width, slotAreaTop)
+    gatekeeperBodiesRef.current = initialGatekeepers
+    if (initialGatekeepers.length > 0) {
+      Matter.World.add(engine.world, initialGatekeepers)
+    }
+
     Matter.Events.on(engine, 'collisionStart', (event) => {
       for (const pair of event.pairs) {
         const labels = [pair.bodyA.label, pair.bodyB.label]
@@ -740,6 +823,7 @@ function App() {
 
         const slotLabel = labels.find((label) => label.startsWith('slot-'))
         const pegHit = labels.includes('peg')
+        const gatekeeperBody = labels[0] === 'gatekeeper' ? pair.bodyA : labels[1] === 'gatekeeper' ? pair.bodyB : null
 
         if (pegHit) {
           audioRef.current?.peg()
@@ -757,7 +841,30 @@ function App() {
           }
         }
 
+        if (gatekeeperBody) {
+          const gatekeeperVx = gatekeeperBody.velocity?.x ?? 0
+          const incomingY = Math.max(0, ballBody.velocity.y)
+          const launchSpeed = Math.max(14, Math.min(20, incomingY * 2.4 + 8))
+          const lateral = ballBody.velocity.x * 0.45 + gatekeeperVx * 0.65
+          ballBody.plugin = {
+            ...(ballBody.plugin ?? {}),
+            lastGatekeeperBounceAt: Date.now(),
+          }
+          Matter.Body.setPosition(ballBody, {
+            x: ballBody.position.x,
+            y: ballBody.position.y - 4,
+          })
+          Matter.Body.setVelocity(ballBody, {
+            x: lateral,
+            y: -launchSpeed,
+          })
+        }
+
         if (slotLabel) {
+          const bouncedAt = ballBody.plugin?.lastGatekeeperBounceAt ?? 0
+          if (Date.now() - bouncedAt < 120) {
+            continue
+          }
           const slotIndex = Number(slotLabel.replace('slot-', ''))
           const reward = Math.round(
             SLOT_BASE_REWARDS[slotIndex] * stateRef.current.slotLevels[slotIndex] * (0.8 + stateRef.current.upgrades.slotGlobalLevel * 0.25),
@@ -800,6 +907,24 @@ function App() {
 
     const runner = Matter.Runner.create()
     runnerRef.current = runner
+    const moveGatekeepers = () => {
+      const now = performance.now()
+      const bodies = gatekeeperBodiesRef.current
+      if (!bodies.length) return
+      const n = bodies.length
+      for (const gkBody of bodies) {
+        const { index, phase, baseW } = gkBody.plugin
+        const sectionW = width / n
+        const baseX = (index + 0.5) * sectionW
+        const amp = Math.max(8, sectionW / 2 - baseW / 2 - 4)
+        const newX = baseX + Math.cos(now * 0.001 + phase) * amp
+        const prevX = gkBody.position.x
+        Matter.Body.setVelocity(gkBody, { x: newX - prevX, y: 0 })
+        Matter.Body.setPosition(gkBody, { x: newX, y: gkBody.position.y })
+      }
+    }
+    Matter.Events.on(engine, 'beforeUpdate', moveGatekeepers)
+
 
     const drawSkinOverlays = () => {
       const ctx = render.context
@@ -877,6 +1002,33 @@ function App() {
           ctx.restore()
         }
       }
+
+      // Draw gatekeepers
+      for (const gkBody of gatekeeperBodiesRef.current) {
+        const { x, y } = gkBody.position
+        const hw = gkBody.plugin.baseW / 2
+        const hh = 7
+        const r = 4
+        ctx.save()
+        ctx.shadowBlur = 22
+        ctx.shadowColor = '#00d4ff'
+        ctx.fillStyle = 'rgba(0, 170, 255, 0.28)'
+        ctxRoundRect(ctx, x - hw, y - hh, hw * 2, hh * 2, r)
+        ctx.fill()
+        ctx.shadowBlur = 14
+        ctx.strokeStyle = '#00e5ff'
+        ctx.lineWidth = 2.4
+        ctxRoundRect(ctx, x - hw, y - hh, hw * 2, hh * 2, r)
+        ctx.stroke()
+        ctx.shadowBlur = 6
+        ctx.strokeStyle = '#a0f8ff'
+        ctx.lineWidth = 1.1
+        ctx.beginPath()
+        ctx.moveTo(x - hw + 6, y)
+        ctx.lineTo(x + hw - 6, y)
+        ctx.stroke()
+        ctx.restore()
+      }
     }
 
     Matter.Events.on(render, 'afterRender', drawSkinOverlays)
@@ -925,6 +1077,8 @@ function App() {
       stopHoldDrop()
       window.removeEventListener('resize', resize)
       Matter.Events.off(render, 'afterRender', drawSkinOverlays)
+        Matter.Events.off(engine, 'beforeUpdate', moveGatekeepers)
+        gatekeeperBodiesRef.current = []
       Matter.Render.stop(render)
       Matter.Runner.stop(runner)
       Matter.World.clear(engine.world, false)
@@ -936,7 +1090,7 @@ function App() {
     if (!engineRef.current) {
       return
     }
-    engineRef.current.gravity.y = 0.78 + upgrades.gravityLevel * 0.18
+    engineRef.current.gravity.y = 0.39 + upgrades.gravityLevel * 0.09
   }, [upgrades.gravityLevel])
 
   useEffect(() => {
@@ -954,6 +1108,22 @@ function App() {
       body.render.lineWidth = nextStyle.lineWidth
     }
   }, [upgrades.pegLevel])
+
+  useEffect(() => {
+    const engine = engineRef.current
+    if (!engine) return
+    const w = engine.render?.options?.width ?? 760
+    const h = engine.render?.options?.height ?? 700
+    const slotTop = h - 168
+    for (const body of gatekeeperBodiesRef.current) {
+      Matter.World.remove(engine.world, body)
+    }
+    const newBodies = createGatekeeperBodies(upgrades.gatekeeperLevel, w, slotTop)
+    gatekeeperBodiesRef.current = newBodies
+    if (newBodies.length > 0) {
+      Matter.World.add(engine.world, newBodies)
+    }
+  }, [upgrades.gatekeeperLevel])
 
   const getUpgradeCost = useCallback((upgradeId, level) => {
     const details = upgradeCatalog.find((entry) => entry.id === upgradeId)
@@ -1180,11 +1350,27 @@ function App() {
                   value={leaderboardUsername}
                   placeholder="Enter a username"
                   maxLength={20}
+                  readOnly={!!committedUsername}
                   onChange={(event) => setLeaderboardUsername(event.target.value)}
                 />
                 <button onClick={submitLeaderboardScore} disabled={leaderboardSubmitting}>
-                  {leaderboardSubmitting ? 'Sending...' : 'Submit'}
+                  {leaderboardSubmitting ? 'Sending...' : committedUsername ? 'Update' : 'Submit'}
                 </button>
+                {committedUsername && (
+                  <button
+                    className="leaderboard-change-btn"
+                    onClick={() => {
+                      setCommittedUsername('')
+                      try {
+                        window.localStorage.removeItem(LEADERBOARD_COMMITTED_USERNAME_KEY)
+                      } catch {
+                        // Ignore storage failures.
+                      }
+                    }}
+                  >
+                    Change
+                  </button>
+                )}
               </div>
               {leaderboardSubmitStatus && <p className="leaderboard-status">{leaderboardSubmitStatus}</p>}
               {leaderboardError && <p className="leaderboard-status error">{leaderboardError}</p>}

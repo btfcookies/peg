@@ -680,6 +680,18 @@
 
 .leaderboard-submit-row button:disabled {
   opacity: 0.45;
+
+  .leaderboard-change-btn {
+    border: 2px solid #2a4669 !important;
+    background: #10151f !important;
+    color: #7aaed4 !important;
+    white-space: nowrap;
+  }
+
+  .leaderboard-change-btn:hover:not(:disabled) {
+    background: #1b2b45 !important;
+    color: #acd4ff !important;
+  }
   cursor: not-allowed;
 }
 

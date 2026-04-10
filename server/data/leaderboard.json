@@ -1,5 +1,18 @@
 [
   {
+    "username": "YourName",
+    "coins": 1000000,
+    "totalCoins": 1000000,
+    "totalBalls": 1,
+    "upgrades": {},
+    "slotLevels": [],
+    "ownedSkins": [
+      "default"
+    ],
+    "selectedSkin": "default",
+    "updatedAt": "2026-04-10T01:45:41.825Z"
+  },
+  {
     "username": "bob",
     "coins": 46803,
     "totalCoins": 97191,
