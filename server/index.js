@@ -221,19 +221,21 @@ async function createMongoStorage(uri) {
     },
     async upsert(entry) {
       const usernameKey = entry.username.toLowerCase()
-      await Entry.findOneAndUpdate(
+      // Use collection.updateOne to bypass Mongoose's Int32 coercion so that
+      // coins and totalCoins are always stored as BSON Double regardless of
+      // magnitude, allowing values well beyond the Int32 limit (2,147,483,647).
+      const { Double } = mongoose.mongo
+      await Entry.collection.updateOne(
         { usernameKey },
         {
           $set: {
             ...entry,
             usernameKey,
+            coins: new Double(entry.coins),
+            totalCoins: new Double(entry.totalCoins),
           },
         },
-        {
-          upsert: true,
-          new: true,
-          setDefaultsOnInsert: true,
-        },
+        { upsert: true },
       )
 
       const rankAbove = await Entry.countDocuments({
