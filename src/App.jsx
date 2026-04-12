@@ -205,6 +205,10 @@ function getBallRenderStyle(skinId, fallbackHue) {
   }
 }
 
+function getGoldenBallCost(goldenBallCount) {
+  return Math.floor(140 * 1.85 ** Math.max(0, goldenBallCount))
+}
+
 function drawBallPolygonPath(ctx, body) {
   const vertices = body.vertices
   if (!vertices || vertices.length === 0) {
@@ -316,6 +320,7 @@ function defaultProgress() {
     coins: 40,
     totalCoins: 0,
     totalBalls: 3,
+    goldenBalls: 0,
     upgrades: { ...UPGRADE_DEFAULTS },
     slotLevels: Array.from({ length: SLOT_COUNT }, () => 1),
     slotFill: Array.from({ length: SLOT_COUNT }, () => 0),
@@ -339,10 +344,13 @@ function loadProgress() {
     }
     const parsed = JSON.parse(stored)
     const ownedSkins = normalizeOwnedSkins(parsed?.ownedSkins)
+    const totalBalls = clampNumber(parsed?.totalBalls, 1, 9999, fallback.totalBalls)
+    const goldenBalls = clampNumber(parsed?.goldenBalls, 0, totalBalls, fallback.goldenBalls)
     return {
       coins: clampNumber(parsed?.coins, 0, Number.MAX_SAFE_INTEGER, fallback.coins),
       totalCoins: clampNumber(parsed?.totalCoins, 0, Number.MAX_SAFE_INTEGER, fallback.totalCoins),
-      totalBalls: clampNumber(parsed?.totalBalls, 1, 9999, fallback.totalBalls),
+      totalBalls,
+      goldenBalls,
       upgrades: normalizeUpgrades(parsed?.upgrades),
       slotLevels: normalizeArray(parsed?.slotLevels, SLOT_COUNT, 1, 9999, 1),
       slotFill: normalizeArray(parsed?.slotFill, SLOT_COUNT, 0, 999999, 0),
@@ -428,6 +436,7 @@ function App() {
   const [coins, setCoins] = useState(initialProgress.coins)
   const [totalCoins, setTotalCoins] = useState(initialProgress.totalCoins)
   const [totalBalls, setTotalBalls] = useState(initialProgress.totalBalls)
+  const [goldenBalls, setGoldenBalls] = useState(initialProgress.goldenBalls)
   const [activeBalls, setActiveBalls] = useState(0)
   const [flashCoins, setFlashCoins] = useState(false)
   const [boardShake, setBoardShake] = useState(false)
@@ -474,13 +483,13 @@ function App() {
   const [slotLevels, setSlotLevels] = useState(initialProgress.slotLevels)
   const [slotFill, setSlotFill] = useState(initialProgress.slotFill)
 
-  const stateRef = useRef({ upgrades, slotLevels, slotFill, totalBalls, activeBalls: 0 })
+  const stateRef = useRef({ upgrades, slotLevels, slotFill, totalBalls, goldenBalls, activeBalls: 0 })
   const nextLeaderboardRefreshAtRef = useRef(Date.now() + LEADERBOARD_REFRESH_MS)
   const submitInFlightRef = useRef(false)
 
   useEffect(() => {
-    stateRef.current = { ...stateRef.current, upgrades, slotLevels, slotFill, totalBalls }
-  }, [upgrades, slotLevels, slotFill, totalBalls])
+    stateRef.current = { ...stateRef.current, upgrades, slotLevels, slotFill, totalBalls, goldenBalls }
+  }, [upgrades, slotLevels, slotFill, totalBalls, goldenBalls])
 
   useEffect(() => {
     if (typeof window === 'undefined') {
@@ -490,6 +499,7 @@ function App() {
       coins,
       totalCoins,
       totalBalls,
+      goldenBalls,
       upgrades,
       slotLevels,
       slotFill,
@@ -503,7 +513,7 @@ function App() {
     } catch {
       // Ignore storage write errors and continue gameplay.
     }
-  }, [coins, totalCoins, totalBalls, upgrades, slotLevels, slotFill, ownedSkins, selectedSkin, soundOn, volume])
+  }, [coins, totalCoins, totalBalls, goldenBalls, upgrades, slotLevels, slotFill, ownedSkins, selectedSkin, soundOn, volume])
 
   useEffect(() => {
     if (typeof window === 'undefined') {
@@ -626,6 +636,7 @@ function App() {
           coins: Math.floor(coins),
           totalCoins: Math.floor(totalCoins),
           totalBalls,
+          goldenBalls,
           upgrades,
           slotLevels,
           ownedSkins,
@@ -682,7 +693,7 @@ function App() {
         setLeaderboardSubmitting(false)
       }
     }
-  }, [coins, leaderboardUsername, ownedSkins, refreshLeaderboard, scheduleNextLeaderboardRefresh, selectedSkin, slotLevels, totalBalls, totalCoins, upgrades])
+  }, [coins, goldenBalls, leaderboardUsername, ownedSkins, refreshLeaderboard, scheduleNextLeaderboardRefresh, selectedSkin, slotLevels, totalBalls, totalCoins, upgrades])
 
   useEffect(() => {
     if (!committedUsername) {
@@ -739,18 +750,28 @@ function App() {
     const width = engine.render?.options?.width ?? 760
     const xCenter = width / 2
     const hue = 175 + Math.floor(Math.random() * 90)
+    const goldenRatio = stateRef.current.totalBalls > 0 ? stateRef.current.goldenBalls / stateRef.current.totalBalls : 0
+    const isGolden = Math.random() < goldenRatio
     const ballRenderStyle = getBallRenderStyle(selectedSkin, hue)
+    const renderStyle = isGolden
+      ? {
+        ...ballRenderStyle,
+        strokeStyle: '#ffd84a',
+        lineWidth: Math.max(2.8, ballRenderStyle.lineWidth ?? 2),
+      }
+      : ballRenderStyle
     const ball = Matter.Bodies.polygon(xCenter + (Math.random() - 0.5) * 24, 32, 8, 8.8, {
       restitution: 0.6,
       friction: 0.004,
       frictionAir: 0.0015,
       density: 0.0018,
       label: 'ball',
-      render: ballRenderStyle,
+      render: renderStyle,
       plugin: {
         intensity,
         createdAt: Date.now(),
         skinId: selectedSkin,
+        isGolden,
         gradientSeed: Math.random(),
       },
     })
@@ -833,7 +854,7 @@ function App() {
     const slotAreaTop = height - 168
 
     const engine = Matter.Engine.create()
-    engine.gravity.y = 0.48
+    engine.gravity.y = 0.24
     engineRef.current = engine
 
     const render = Matter.Render.create({
@@ -938,12 +959,14 @@ function App() {
           if (Math.random() < pegChance) {
             const crit = Math.random() < 0.1
             const pegPayoutMultiplier = 1.5 ** Math.max(0, pegLevel - 1)
-            const amount = Math.max(1, Math.ceil((crit ? 5 : 1) * pegPayoutMultiplier))
+            const goldenPegMultiplier = ballBody.plugin?.isGolden ? 2 : 1
+            const amount = Math.max(1, Math.ceil((crit ? 5 : 1) * pegPayoutMultiplier * goldenPegMultiplier))
             registerCoins(amount)
             const x = (ballBody.position.x / width) * 100
             const y = (ballBody.position.y / height) * 100
             const rainbow = rainbowLevel > 0
-            addFloater(x, y, `+${amount}`, rainbow ? (crit ? 'pegCrit' : 'peg') : 'pegBase')
+            const floaterKind = rainbow ? (crit ? 'pegCrit' : 'peg') : 'pegBase'
+            addFloater(x, y, `+${amount}`, floaterKind)
           }
         }
 
@@ -1107,6 +1130,17 @@ function App() {
           ctx.stroke()
           ctx.restore()
         }
+
+        if (body.plugin?.isGolden) {
+          ctx.save()
+          drawBallPolygonPath(ctx, body)
+          ctx.lineWidth = 3.1
+          ctx.strokeStyle = '#ffd84a'
+          ctx.shadowBlur = 11
+          ctx.shadowColor = '#ffe89a'
+          ctx.stroke()
+          ctx.restore()
+        }
       }
 
       // Draw gatekeepers
@@ -1196,7 +1230,7 @@ function App() {
     if (!engineRef.current) {
       return
     }
-    engineRef.current.gravity.y = 0.39 + upgrades.gravityLevel * 0.09
+    engineRef.current.gravity.y = 0.195 + upgrades.gravityLevel * 0.045
   }, [upgrades.gravityLevel])
 
   useEffect(() => {
@@ -1249,6 +1283,18 @@ function App() {
     setTotalBalls((value) => value + 1)
     audioRef.current?.buy()
   }, [coins, totalBalls])
+
+  const buyGoldenBall = useCallback(() => {
+    const cost = getGoldenBallCost(goldenBalls)
+    if (coins < cost) {
+      audioRef.current?.fail()
+      return
+    }
+    setCoins((value) => value - cost)
+    setTotalBalls((value) => value + 1)
+    setGoldenBalls((value) => value + 1)
+    audioRef.current?.buy()
+  }, [coins, goldenBalls])
 
   const buyUpgrade = useCallback(
     (upgradeId) => {
@@ -1554,6 +1600,8 @@ function App() {
                     <strong>{selectedLeaderboardPlayer.totalCoins.toLocaleString()}</strong>
                     <span>Balls</span>
                     <strong>{selectedLeaderboardPlayer.totalBalls}</strong>
+                    <span>Golden Balls</span>
+                    <strong>{selectedLeaderboardPlayer.goldenBalls ?? 0}</strong>
                     <span>Skin</span>
                     <strong>{selectedLeaderboardPlayer.selectedSkin ?? 'default'}</strong>
                     <span>Skins</span>
@@ -1620,6 +1668,18 @@ function App() {
                   <span>{totalBalls} owned</span>
                   <button disabled={coins < Math.floor(18 * 1.6 ** (totalBalls - 3))} onClick={buyBall}>
                     Buy • {Math.floor(18 * 1.6 ** (totalBalls - 3))}
+                  </button>
+                </div>
+              </article>
+              <article className="upgrade-card">
+                <div>
+                  <h3>Golden Ball</h3>
+                  <p>Add one premium ball with a golden outline. Peg hits from golden balls earn 2x peg coins.</p>
+                </div>
+                <div className="upgrade-meta">
+                  <span>{goldenBalls} golden</span>
+                  <button disabled={coins < getGoldenBallCost(goldenBalls)} onClick={buyGoldenBall}>
+                    Buy • {getGoldenBallCost(goldenBalls)}
                   </button>
                 </div>
               </article>
