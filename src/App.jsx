@@ -366,6 +366,40 @@ function loadProgress() {
   }
 }
 
+function createProgressFromLeaderboardPlayer(player, currentProgress = defaultProgress()) {
+  const base = currentProgress && typeof currentProgress === 'object' ? currentProgress : defaultProgress()
+  const ownedSkins = normalizeOwnedSkins(player?.ownedSkins)
+  const totalBalls = clampNumber(player?.totalBalls, 1, 9999, base.totalBalls)
+  const goldenBalls = clampNumber(player?.goldenBalls, 0, totalBalls, base.goldenBalls)
+
+  return {
+    coins: clampNumber(player?.coins, 0, Number.MAX_SAFE_INTEGER, base.coins),
+    totalCoins: clampNumber(player?.totalCoins, 0, Number.MAX_SAFE_INTEGER, base.totalCoins),
+    totalBalls,
+    goldenBalls,
+    upgrades: normalizeUpgrades(player?.upgrades),
+    slotLevels: normalizeArray(player?.slotLevels, SLOT_COUNT, 1, 9999, 1),
+    slotFill: normalizeArray(base.slotFill, SLOT_COUNT, 0, 999999, 0),
+    ownedSkins,
+    selectedSkin: normalizeSelectedSkin(player?.selectedSkin, ownedSkins),
+    soundOn: typeof base.soundOn === 'boolean' ? base.soundOn : true,
+    volume: clampNumber(base.volume, 0, 1, 0.18),
+  }
+}
+
+function createRemoteSyncHash(progress) {
+  return JSON.stringify({
+    coins: Math.floor(progress?.coins ?? 0),
+    totalCoins: Math.floor(progress?.totalCoins ?? 0),
+    totalBalls: clampNumber(progress?.totalBalls, 1, 9999, 1),
+    goldenBalls: clampNumber(progress?.goldenBalls, 0, 9999, 0),
+    upgrades: normalizeUpgrades(progress?.upgrades),
+    slotLevels: normalizeArray(progress?.slotLevels, SLOT_COUNT, 1, 9999, 1),
+    ownedSkins: normalizeOwnedSkins(progress?.ownedSkins),
+    selectedSkin: typeof progress?.selectedSkin === 'string' ? progress.selectedSkin : DEFAULT_SKIN_ID,
+  })
+}
+
 function createAudioEngine() {
   const AudioCtx = window.AudioContext || window.webkitAudioContext
   if (!AudioCtx) {
@@ -494,6 +528,77 @@ function App() {
   const lastRemoteSavedHashRef = useRef('')
   const hasUnsyncedRemoteProgressRef = useRef(false)
 
+  const applyProgressSnapshot = useCallback((nextProgress, options = {}) => {
+    const { markRemoteSaved = false } = options
+    setCoins(nextProgress.coins)
+    setTotalCoins(nextProgress.totalCoins)
+    setTotalBalls(nextProgress.totalBalls)
+    setGoldenBalls(nextProgress.goldenBalls)
+    setUpgrades(nextProgress.upgrades)
+    setSlotLevels(nextProgress.slotLevels)
+    setSlotFill(nextProgress.slotFill)
+    setOwnedSkins(nextProgress.ownedSkins)
+    setSelectedSkin(nextProgress.selectedSkin)
+    setSoundOn(nextProgress.soundOn)
+    setVolume(nextProgress.volume)
+
+    latestProgressRef.current = nextProgress
+    latestProgressHashRef.current = JSON.stringify(nextProgress)
+    if (markRemoteSaved) {
+      lastRemoteSavedHashRef.current = createRemoteSyncHash(nextProgress)
+      hasUnsyncedRemoteProgressRef.current = false
+    }
+  }, [])
+
+  const hydrateProgressFromRemote = useCallback(async (username, reason = 'manual-refresh') => {
+    const normalizedUsername = username.trim()
+    if (!normalizedUsername) {
+      return false
+    }
+
+    try {
+      const response = await fetch(apiUrl(`/api/leaderboard/${encodeURIComponent(normalizedUsername)}?t=${Date.now()}`), {
+        cache: 'no-store',
+      })
+      if (!response.ok) {
+        throw new Error('Could not load player profile.')
+      }
+
+      const data = await response.json()
+      const remoteProgress = createProgressFromLeaderboardPlayer(data?.player, {
+        coins,
+        totalCoins,
+        totalBalls,
+        goldenBalls,
+        upgrades,
+        slotLevels,
+        slotFill,
+        ownedSkins,
+        selectedSkin,
+        soundOn,
+        volume,
+      })
+
+      applyProgressSnapshot(remoteProgress, { markRemoteSaved: true })
+      setSelectedLeaderboardPlayer(data?.player ? { ...data.player, rank: data.rank } : null)
+      setLeaderboardSubmitStatus(`Synced from server. Current rank: #${data.rank}`)
+      console.log('[progress] remote hydrate success', {
+        reason,
+        username: normalizedUsername,
+        rank: data.rank,
+        coins: data?.player?.coins ?? null,
+      })
+      return true
+    } catch (error) {
+      console.error('[progress] remote hydrate failed', {
+        reason,
+        username: normalizedUsername,
+        error: error instanceof Error ? error.message : 'unknown error',
+      })
+      return false
+    }
+  }, [applyProgressSnapshot, coins, goldenBalls, ownedSkins, selectedSkin, slotFill, slotLevels, soundOn, totalBalls, totalCoins, upgrades, volume])
+
   useEffect(() => {
     stateRef.current = { ...stateRef.current, upgrades, slotLevels, slotFill, totalBalls, goldenBalls }
   }, [upgrades, slotLevels, slotFill, totalBalls, goldenBalls])
@@ -538,7 +643,7 @@ function App() {
       latestProgressHashRef.current = JSON.stringify(payload)
 
       if (committedUsername) {
-        hasUnsyncedRemoteProgressRef.current = latestProgressHashRef.current !== lastRemoteSavedHashRef.current
+        hasUnsyncedRemoteProgressRef.current = createRemoteSyncHash(payload) !== lastRemoteSavedHashRef.current
       } else {
         hasUnsyncedRemoteProgressRef.current = false
       }
@@ -547,6 +652,14 @@ function App() {
       console.error('[progress] local save failed, remote sync fallback still available if configured')
     }
   }, [coins, committedUsername, totalCoins, totalBalls, goldenBalls, upgrades, slotLevels, slotFill, ownedSkins, selectedSkin, soundOn, volume])
+
+  useEffect(() => {
+    if (!committedUsername) {
+      return
+    }
+
+    hydrateProgressFromRemote(committedUsername, 'startup-hydrate')
+  }, [committedUsername, hydrateProgressFromRemote])
 
   useEffect(() => {
     if (typeof window === 'undefined') {
@@ -669,16 +782,7 @@ function App() {
       selectedSkin,
     }
 
-    const payloadHash = JSON.stringify({
-      coins: payload.coins,
-      totalCoins: payload.totalCoins,
-      totalBalls: payload.totalBalls,
-      goldenBalls: payload.goldenBalls,
-      upgrades: payload.upgrades,
-      slotLevels: payload.slotLevels,
-      ownedSkins: payload.ownedSkins,
-      selectedSkin: payload.selectedSkin,
-    })
+    const payloadHash = createRemoteSyncHash(payload)
 
     console.log('[leaderboard] submit start', { reason, username, payloadHash })
 
@@ -785,11 +889,12 @@ function App() {
   const handleLeaderboardPrimaryAction = useCallback(() => {
     if (committedUsername) {
       refreshLeaderboard('manual-refresh')
+      hydrateProgressFromRemote(committedUsername, 'manual-refresh')
       scheduleNextLeaderboardRefresh()
       return
     }
     submitLeaderboardScore()
-  }, [committedUsername, refreshLeaderboard, scheduleNextLeaderboardRefresh, submitLeaderboardScore])
+  }, [committedUsername, hydrateProgressFromRemote, refreshLeaderboard, scheduleNextLeaderboardRefresh, submitLeaderboardScore])
 
   useEffect(() => {
     if (typeof window === 'undefined') {
