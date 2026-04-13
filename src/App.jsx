@@ -523,8 +523,8 @@ function App() {
   const stateRef = useRef({ upgrades, slotLevels, slotFill, totalBalls, goldenBalls, activeBalls: 0 })
   const nextLeaderboardRefreshAtRef = useRef(Date.now() + LEADERBOARD_REFRESH_MS)
   const submitInFlightRef = useRef(false)
-  const latestProgressRef = useRef(null)
-  const latestProgressHashRef = useRef('')
+  const latestProgressRef = useRef(initialProgress)
+  const latestProgressHashRef = useRef(JSON.stringify(initialProgress))
   const lastRemoteSavedHashRef = useRef('')
   const hasUnsyncedRemoteProgressRef = useRef(false)
 
@@ -565,19 +565,10 @@ function App() {
       }
 
       const data = await response.json()
-      const remoteProgress = createProgressFromLeaderboardPlayer(data?.player, {
-        coins,
-        totalCoins,
-        totalBalls,
-        goldenBalls,
-        upgrades,
-        slotLevels,
-        slotFill,
-        ownedSkins,
-        selectedSkin,
-        soundOn,
-        volume,
-      })
+      const remoteProgress = createProgressFromLeaderboardPlayer(
+        data?.player,
+        latestProgressRef.current ?? initialProgress,
+      )
 
       applyProgressSnapshot(remoteProgress, { markRemoteSaved: true })
       setSelectedLeaderboardPlayer(data?.player ? { ...data.player, rank: data.rank } : null)
@@ -597,7 +588,7 @@ function App() {
       })
       return false
     }
-  }, [applyProgressSnapshot, coins, goldenBalls, ownedSkins, selectedSkin, slotFill, slotLevels, soundOn, totalBalls, totalCoins, upgrades, volume])
+  }, [applyProgressSnapshot, initialProgress])
 
   useEffect(() => {
     stateRef.current = { ...stateRef.current, upgrades, slotLevels, slotFill, totalBalls, goldenBalls }
