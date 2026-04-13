@@ -121,7 +121,6 @@ const UPGRADE_MIN_LEVELS = {
 const UPGRADE_MAX_LEVELS = Object.fromEntries(
   upgradeCatalog.map((upgrade) => [upgrade.id, upgrade.id === 'gatekeeperLevel' ? upgrade.maxLevel : Number.POSITIVE_INFINITY]),
 )
-const SAVE_STORAGE_KEY = 'peg-progress-v1'
 const UPDATE_SEEN_STORAGE_KEY = 'seenUpdate'
 const LEADERBOARD_USERNAME_KEY = 'peg-leaderboard-username-v1'
 const LEADERBOARD_COMMITTED_USERNAME_KEY = 'peg-leaderboard-committed-username-v1'
@@ -334,36 +333,7 @@ function defaultProgress() {
 }
 
 function loadProgress() {
-  const fallback = defaultProgress()
-  if (typeof window === 'undefined') {
-    return fallback
-  }
-
-  try {
-    const stored = window.localStorage.getItem(SAVE_STORAGE_KEY)
-    if (!stored) {
-      return fallback
-    }
-    const parsed = JSON.parse(stored)
-    const ownedSkins = normalizeOwnedSkins(parsed?.ownedSkins)
-    const totalBalls = clampNumber(parsed?.totalBalls, 1, 9999, fallback.totalBalls)
-    const goldenBalls = clampNumber(parsed?.goldenBalls, 0, totalBalls, fallback.goldenBalls)
-    return {
-      coins: clampNumber(parsed?.coins, 0, Number.MAX_SAFE_INTEGER, fallback.coins),
-      totalCoins: clampNumber(parsed?.totalCoins, 0, Number.MAX_SAFE_INTEGER, fallback.totalCoins),
-      totalBalls,
-      goldenBalls,
-      upgrades: normalizeUpgrades(parsed?.upgrades),
-      slotLevels: normalizeArray(parsed?.slotLevels, SLOT_COUNT, 1, 9999, 1),
-      slotFill: normalizeArray(parsed?.slotFill, SLOT_COUNT, 0, 999999, 0),
-      ownedSkins,
-      selectedSkin: normalizeSelectedSkin(parsed?.selectedSkin, ownedSkins),
-      soundOn: typeof parsed?.soundOn === 'boolean' ? parsed.soundOn : fallback.soundOn,
-      volume: clampNumber(parsed?.volume, 0, 1, fallback.volume),
-    }
-  } catch {
-    return fallback
-  }
+  return defaultProgress()
 }
 
 function createProgressFromLeaderboardPlayer(player, currentProgress = defaultProgress()) {
@@ -550,6 +520,26 @@ function App() {
     }
   }, [])
 
+  const fetchPlayerProfile = useCallback(async (username) => {
+    const normalizedUsername = username.trim()
+    if (!normalizedUsername) {
+      return null
+    }
+
+    const response = await fetch(apiUrl(`/api/leaderboard/${encodeURIComponent(normalizedUsername)}?t=${Date.now()}`), {
+      cache: 'no-store',
+    })
+
+    if (response.status === 404) {
+      return null
+    }
+    if (!response.ok) {
+      throw new Error('Could not load player profile.')
+    }
+
+    return response.json()
+  }, [])
+
   const hydrateProgressFromRemote = useCallback(async (username, reason = 'manual-refresh') => {
     const normalizedUsername = username.trim()
     if (!normalizedUsername) {
@@ -557,14 +547,10 @@ function App() {
     }
 
     try {
-      const response = await fetch(apiUrl(`/api/leaderboard/${encodeURIComponent(normalizedUsername)}?t=${Date.now()}`), {
-        cache: 'no-store',
-      })
-      if (!response.ok) {
-        throw new Error('Could not load player profile.')
+      const data = await fetchPlayerProfile(normalizedUsername)
+      if (!data?.player) {
+        return false
       }
-
-      const data = await response.json()
       const remoteProgress = createProgressFromLeaderboardPlayer(
         data?.player,
         latestProgressRef.current ?? initialProgress,
@@ -588,7 +574,7 @@ function App() {
       })
       return false
     }
-  }, [applyProgressSnapshot, initialProgress])
+  }, [applyProgressSnapshot, fetchPlayerProfile, initialProgress])
 
   useEffect(() => {
     stateRef.current = { ...stateRef.current, upgrades, slotLevels, slotFill, totalBalls, goldenBalls }
@@ -612,9 +598,6 @@ function App() {
   }, [])
 
   useEffect(() => {
-    if (typeof window === 'undefined') {
-      return
-    }
     const payload = {
       coins,
       totalCoins,
@@ -628,19 +611,14 @@ function App() {
       soundOn,
       volume,
     }
-    try {
-      window.localStorage.setItem(SAVE_STORAGE_KEY, JSON.stringify(payload))
-      latestProgressRef.current = payload
-      latestProgressHashRef.current = JSON.stringify(payload)
 
-      if (committedUsername) {
-        hasUnsyncedRemoteProgressRef.current = createRemoteSyncHash(payload) !== lastRemoteSavedHashRef.current
-      } else {
-        hasUnsyncedRemoteProgressRef.current = false
-      }
-    } catch {
-      // Ignore storage write errors and continue gameplay.
-      console.error('[progress] local save failed, remote sync fallback still available if configured')
+    latestProgressRef.current = payload
+    latestProgressHashRef.current = JSON.stringify(payload)
+
+    if (committedUsername) {
+      hasUnsyncedRemoteProgressRef.current = createRemoteSyncHash(payload) !== lastRemoteSavedHashRef.current
+    } else {
+      hasUnsyncedRemoteProgressRef.current = false
     }
   }, [coins, committedUsername, totalCoins, totalBalls, goldenBalls, upgrades, slotLevels, slotFill, ownedSkins, selectedSkin, soundOn, volume])
 
@@ -808,6 +786,11 @@ function App() {
         // Ignore storage failures.
       }
       if (data.player) {
+        const savedProgress = createProgressFromLeaderboardPlayer(
+          data.player,
+          latestProgressRef.current ?? initialProgress,
+        )
+        applyProgressSnapshot(savedProgress, { markRemoteSaved: true })
         setSelectedLeaderboardPlayer({ ...data.player, rank: data.rank })
       }
       if (showStatus) {
@@ -819,8 +802,10 @@ function App() {
         rank: data.rank,
         coins: data?.player?.coins ?? null,
       })
-      lastRemoteSavedHashRef.current = payloadHash
-      hasUnsyncedRemoteProgressRef.current = payloadHash !== latestProgressHashRef.current
+      if (!data.player) {
+        lastRemoteSavedHashRef.current = payloadHash
+        hasUnsyncedRemoteProgressRef.current = createRemoteSyncHash(latestProgressRef.current) !== lastRemoteSavedHashRef.current
+      }
       console.log('[progress] remote sync success', {
         reason,
         username,
@@ -836,7 +821,7 @@ function App() {
         reason,
         username,
       })
-      console.error('[progress] remote sync failed; local progress remains in browser storage', {
+      console.error('[progress] remote sync failed; local in-memory progress remains unsynced', {
         reason,
         username,
       })
@@ -846,7 +831,75 @@ function App() {
         setLeaderboardSubmitting(false)
       }
     }
-  }, [coins, goldenBalls, leaderboardUsername, ownedSkins, refreshLeaderboard, scheduleNextLeaderboardRefresh, selectedSkin, slotLevels, totalBalls, totalCoins, upgrades])
+  }, [applyProgressSnapshot, coins, goldenBalls, initialProgress, leaderboardUsername, ownedSkins, refreshLeaderboard, scheduleNextLeaderboardRefresh, selectedSkin, slotLevels, totalBalls, totalCoins, upgrades])
+
+  const syncCommittedUserProgress = useCallback(async (options = {}) => {
+    const {
+      username = committedUsername,
+      reason = 'auto',
+      allowPush = true,
+      refreshAfter = true,
+      showConflictStatus = true,
+    } = options
+
+    const normalizedUsername = username.trim()
+    if (!normalizedUsername) {
+      return 'no-username'
+    }
+
+    try {
+      const remote = await fetchPlayerProfile(normalizedUsername)
+      if (remote?.player) {
+        const remoteHash = createRemoteSyncHash(remote.player)
+        const hasKnownRemote = lastRemoteSavedHashRef.current !== ''
+        const remoteChangedExternally = hasKnownRemote && remoteHash !== lastRemoteSavedHashRef.current
+
+        if (remoteChangedExternally) {
+          const remoteProgress = createProgressFromLeaderboardPlayer(
+            remote.player,
+            latestProgressRef.current ?? initialProgress,
+          )
+          applyProgressSnapshot(remoteProgress, { markRemoteSaved: true })
+          setSelectedLeaderboardPlayer({ ...remote.player, rank: remote.rank })
+          if (showConflictStatus) {
+            setLeaderboardSubmitStatus(`Server data changed. Synced latest MongoDB values (#${remote.rank}).`)
+          }
+          console.warn('[progress] remote override applied', {
+            reason,
+            username: normalizedUsername,
+            rank: remote.rank,
+          })
+          if (refreshAfter) {
+            await refreshLeaderboard(`${reason}-override`)
+          }
+          return 'remote-override'
+        }
+
+        lastRemoteSavedHashRef.current = remoteHash
+      }
+
+      if (allowPush && hasUnsyncedRemoteProgressRef.current) {
+        await submitLeaderboardScore({
+          usernameOverride: normalizedUsername,
+          showStatus: false,
+          reason,
+        })
+        return 'pushed'
+      }
+
+      if (refreshAfter) {
+        await refreshLeaderboard(reason === 'manual-refresh' ? 'manual-refresh' : 'auto-heartbeat')
+      }
+      return 'noop'
+    } catch (error) {
+      console.error('[progress] committed user sync failed', {
+        reason,
+        username: normalizedUsername,
+        error: error instanceof Error ? error.message : 'unknown error',
+      })
+      return 'error'
+    }
+  }, [applyProgressSnapshot, committedUsername, fetchPlayerProfile, initialProgress, refreshLeaderboard, submitLeaderboardScore])
 
   useEffect(() => {
     if (!committedUsername) {
@@ -856,35 +909,38 @@ function App() {
     console.log('[progress] remote autosync started', { intervalMs: PROGRESS_SYNC_MS, username: committedUsername })
 
     const intervalId = window.setInterval(() => {
-      const hasPendingChanges = hasUnsyncedRemoteProgressRef.current
       console.log('[progress] autosync tick', {
-        hasPendingChanges,
-        action: hasPendingChanges ? 'push-to-backend' : 'refresh-only',
+        hasPendingChanges: hasUnsyncedRemoteProgressRef.current,
+        action: 'sync-compare-then-apply',
       })
-      if (!hasPendingChanges) {
-        refreshLeaderboard('auto-heartbeat')
-        return
-      }
-      submitLeaderboardScore({
-        usernameOverride: committedUsername,
-        showStatus: false,
+      syncCommittedUserProgress({
+        username: committedUsername,
         reason: 'auto',
+        allowPush: true,
+        refreshAfter: true,
+        showConflictStatus: true,
       })
     }, PROGRESS_SYNC_MS)
 
     return () => {
       window.clearInterval(intervalId)
     }
-  }, [committedUsername, refreshLeaderboard, submitLeaderboardScore])
+  }, [committedUsername, syncCommittedUserProgress])
 
   const handleLeaderboardPrimaryAction = useCallback(() => {
     if (committedUsername) {
-      refreshLeaderboard('manual-refresh')
+      syncCommittedUserProgress({
+        username: committedUsername,
+        reason: 'manual-refresh',
+        allowPush: false,
+        refreshAfter: true,
+        showConflictStatus: true,
+      })
       scheduleNextLeaderboardRefresh()
       return
     }
     submitLeaderboardScore()
-  }, [committedUsername, refreshLeaderboard, scheduleNextLeaderboardRefresh, submitLeaderboardScore])
+  }, [committedUsername, scheduleNextLeaderboardRefresh, submitLeaderboardScore, syncCommittedUserProgress])
 
   useEffect(() => {
     if (typeof window === 'undefined') {
