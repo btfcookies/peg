@@ -11,6 +11,8 @@ const DATA_DIR = path.join(__dirname, 'data')
 const LEADERBOARD_FILE = path.join(DATA_DIR, 'leaderboard.json')
 const PORT = Number(process.env.PORT) || 3001
 const MONGODB_URI = process.env.MONGODB_URI?.trim()
+const READ_ONLY_MODE = /^(1|true|yes)$/i.test(process.env.READ_ONLY_MODE ?? '')
+const EMERGENCY_SHUTDOWN = /^(1|true|yes)$/i.test(process.env.EMERGENCY_SHUTDOWN ?? '')
 const CORS_ORIGINS = (process.env.CORS_ORIGINS ?? '')
   .split(',')
   .map((origin) => origin.trim())
@@ -293,6 +295,18 @@ app.use(cors(corsOptions))
 app.options('*', cors(corsOptions))
 app.use(express.json({ limit: '500kb' }))
 
+app.use((req, res, next) => {
+  if (!EMERGENCY_SHUTDOWN) {
+    next()
+    return
+  }
+
+  res.status(503).json({
+    error: 'Service temporarily unavailable.',
+    maintenance: true,
+  })
+})
+
 app.get('/', (_req, res) => {
   res.json({ name: 'Plinko Leaderboard API', status: 'ok', endpoints: ['/api/health', '/api/leaderboard'] })
 })
@@ -301,6 +315,8 @@ app.get('/api/health', (_req, res) => {
   res.json({
     ok: true,
     storage: storage?.mode ?? 'unknown',
+    readOnlyMode: READ_ONLY_MODE,
+    emergencyShutdown: EMERGENCY_SHUTDOWN,
   })
 })
 
@@ -339,6 +355,14 @@ app.get('/api/leaderboard/:username', async (req, res) => {
 })
 
 app.post('/api/leaderboard/submit', async (req, res) => {
+  if (READ_ONLY_MODE) {
+    res.status(503).json({
+      error: 'Leaderboard submissions are temporarily disabled.',
+      readOnlyMode: true,
+    })
+    return
+  }
+
   const username = sanitizeUsername(req.body?.username)
   if (!username) {
     res.status(400).json({ error: 'Username must be 3-20 characters using letters, numbers, spaces, _ or -.' })
@@ -384,6 +408,8 @@ async function startServer() {
   app.listen(PORT, () => {
     console.log(`Leaderboard server running at http://localhost:${PORT}`)
     console.log(`Leaderboard storage mode: ${storage.mode}`)
+    console.log(`Leaderboard read-only mode: ${READ_ONLY_MODE}`)
+    console.log(`Leaderboard emergency shutdown: ${EMERGENCY_SHUTDOWN}`)
   })
 }
 

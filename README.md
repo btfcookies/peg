@@ -67,6 +67,29 @@ Then redeploy the site.
 
 Also allow your Netlify site origin in backend CORS settings.
 
+### Emergency Shutdown / Read-Only Mode
+
+If you need to contain an incident quickly:
+
+- Set `EMERGENCY_SHUTDOWN=true` on the backend to return `503` for every request.
+- Set `READ_ONLY_MODE=true` on the backend to keep reads available but block `POST /api/leaderboard/submit`.
+
+PowerShell example:
+
+```powershell
+$env:EMERGENCY_SHUTDOWN="true"
+npm run server
+```
+
+Or keep the leaderboard visible while stopping new writes:
+
+```powershell
+$env:READ_ONLY_MODE="true"
+npm run server
+```
+
+If the backend is deployed on Render, Railway, Fly.io, or similar, set the same environment variable in the host dashboard and redeploy/restart the service.
+
 ### Global Persistent Mode (MongoDB Atlas)
 
 To make the leaderboard persistent globally (shared by all users and not tied to one local machine), run the server with a hosted MongoDB database:
