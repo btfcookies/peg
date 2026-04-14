@@ -136,6 +136,7 @@ function normalizeEntry(raw) {
     ownedSkins: normalizeOwnedSkins(raw?.ownedSkins),
     selectedSkin: typeof raw?.selectedSkin === 'string' ? raw.selectedSkin : 'default',
     updatedAt: typeof raw?.updatedAt === 'string' ? raw.updatedAt : now,
+    goldenBalls: clampNumber(raw?.goldenBalls, 0),
   }
 }
 
