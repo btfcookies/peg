@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import Matter from 'matter-js'
-import './App.css'
+import './src/App.css'
 
 const SLOT_COUNT = 9
 const SLOT_BASE_REWARDS = [20, 12, 8, 5, 3, 5, 8, 12, 20]
