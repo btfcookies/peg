@@ -165,6 +165,11 @@ function apiUrl(path) {
   return `${API_BASE_URL}${path}`
 }
 
+function isTokenUsernameMismatchError(message) {
+  if (typeof message !== 'string') return false
+  return message.toLowerCase().includes('player token does not match this username')
+}
+
 function lerpColor(from, to, amount) {
   const t = Math.min(1, Math.max(0, amount))
   const fromValue = Number.parseInt(from.slice(1), 16)
@@ -606,6 +611,15 @@ function App() {
   const latestProgressHashRef = useRef(JSON.stringify(initialProgress))
   const lastRemoteSavedHashRef = useRef('')
   const hasUnsyncedRemoteProgressRef = useRef(false)
+
+  const clearCommittedIdentity = useCallback(() => {
+    setCommittedUsername('')
+    try {
+      window.localStorage.removeItem(LEADERBOARD_COMMITTED_USERNAME_KEY)
+    } catch {
+      // Ignore storage failures.
+    }
+  }, [])
 
   const applyProgressSnapshot = useCallback((nextProgress, options = {}) => {
     const { markRemoteSaved = false } = options
@@ -1149,10 +1163,17 @@ function App() {
       return data?.clan ?? null
     } catch (error) {
       setMyClan(null)
-      setClansError(error instanceof Error ? error.message : 'Could not load your clan.')
+      const errorMessage = error instanceof Error ? error.message : 'Could not load your clan.'
+      if (isTokenUsernameMismatchError(errorMessage)) {
+        clearCommittedIdentity()
+        setClansError('Your saved username/token pair is no longer valid. Submit your username again to continue using clans.')
+        setLeaderboardSubmitStatus('Session changed. Please submit your username again.')
+        return null
+      }
+      setClansError(errorMessage)
       return null
     }
-  }, [committedUsername, leaderboardOwnerToken])
+  }, [clearCommittedIdentity, committedUsername, leaderboardOwnerToken])
 
   const fetchClanHome = useCallback(async (clanKeyOverride) => {
     const username = committedUsername.trim()
@@ -2500,14 +2521,7 @@ function App() {
                 {committedUsername && (
                   <button
                     className="leaderboard-change-btn"
-                    onClick={() => {
-                      setCommittedUsername('')
-                      try {
-                        window.localStorage.removeItem(LEADERBOARD_COMMITTED_USERNAME_KEY)
-                      } catch {
-                        // Ignore storage failures.
-                      }
-                    }}
+                    onClick={clearCommittedIdentity}
                   >
                     Change
                   </button>
