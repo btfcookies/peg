@@ -871,12 +871,12 @@ function App() {
       if (showStatus) {
         setLeaderboardSubmitStatus('Username must be 3-20 chars: letters, numbers, spaces, _ or -.')
       }
-      return
+      return false
     }
 
     if (submitInFlightRef.current) {
       console.log('[progress] remote sync skipped, submit already in-flight', { reason, username })
-      return
+      return false
     }
     submitInFlightRef.current = true
 
@@ -923,7 +923,7 @@ function App() {
           status: response.status,
           error: typeof data?.error === 'string' ? data.error : null,
         })
-        return
+        return false
       }
 
       setCommittedUsername(username)
@@ -960,6 +960,7 @@ function App() {
       })
       scheduleNextLeaderboardRefresh()
       await refreshLeaderboard(reason === 'auto' ? 'autosubmit' : 'submit')
+      return true
     } catch {
       if (showStatus) {
         setLeaderboardSubmitStatus('Submission failed. Check backend URL and CORS settings.')
@@ -972,6 +973,7 @@ function App() {
         reason,
         username,
       })
+      return false
     } finally {
       submitInFlightRef.current = false
       if (showStatus) {
@@ -979,6 +981,32 @@ function App() {
       }
     }
   }, [applyProgressSnapshot, coins, goldenBalls, initialProgress, leaderboardOwnerToken, leaderboardUsername, ownedSkins, refreshLeaderboard, scheduleNextLeaderboardRefresh, selectedSkin, slotLevels, totalBalls, totalCoins, upgrades])
+
+  const resolveClanUsername = useCallback(() => {
+    return (committedUsername || leaderboardUsername).trim()
+  }, [committedUsername, leaderboardUsername])
+
+  const ensureClanIdentity = useCallback(async () => {
+    const username = resolveClanUsername()
+    if (!username || !leaderboardOwnerToken) {
+      return null
+    }
+    if (committedUsername.trim()) {
+      return committedUsername.trim()
+    }
+
+    const linked = await submitLeaderboardScore({
+      usernameOverride: username,
+      showStatus: false,
+      reason: 'clans-auth',
+    })
+
+    if (!linked) {
+      return null
+    }
+
+    return username
+  }, [committedUsername, leaderboardOwnerToken, resolveClanUsername, submitLeaderboardScore])
 
   const syncCommittedUserProgress = useCallback(async (options = {}) => {
     const {
@@ -1124,7 +1152,7 @@ function App() {
   }, [])
 
   const fetchMyClan = useCallback(async () => {
-    const username = committedUsername.trim()
+    const username = await ensureClanIdentity()
     if (!username || !leaderboardOwnerToken) {
       setMyClan(null)
       return null
@@ -1173,10 +1201,10 @@ function App() {
       setClansError(errorMessage)
       return null
     }
-  }, [clearCommittedIdentity, committedUsername, leaderboardOwnerToken])
+  }, [clearCommittedIdentity, ensureClanIdentity, leaderboardOwnerToken, setLeaderboardSubmitStatus])
 
   const fetchClanHome = useCallback(async (clanKeyOverride) => {
-    const username = committedUsername.trim()
+    const username = await ensureClanIdentity()
     const clanKey = (clanKeyOverride ?? myClan?.key ?? '').trim()
     if (!username || !clanKey || !leaderboardOwnerToken) {
       return
@@ -1215,12 +1243,12 @@ function App() {
     } catch (error) {
       setClansStatus(error instanceof Error ? error.message : 'Could not load clan home.')
     }
-  }, [committedUsername, leaderboardOwnerToken, myClan?.key])
+  }, [ensureClanIdentity, leaderboardOwnerToken, myClan?.key])
 
   const createClan = useCallback(async () => {
-    const username = committedUsername.trim()
+    const username = await ensureClanIdentity()
     if (!username || !leaderboardOwnerToken) {
-      setClansStatus('Submit your leaderboard username first.')
+      setClansStatus('Set your leaderboard username first to use clans.')
       return
     }
     if (!createClanIcon) {
@@ -1263,12 +1291,12 @@ function App() {
     } catch (error) {
       setClansStatus(error instanceof Error ? error.message : 'Could not create clan.')
     }
-  }, [clanSearchTerm, committedUsername, createClanDescription, createClanIcon, createClanName, createClanPermission, fetchClanHome, fetchClans, fetchMyClan, fetchWarLeaderboard, leaderboardOwnerToken])
+  }, [clanSearchTerm, createClanDescription, createClanIcon, createClanName, createClanPermission, ensureClanIdentity, fetchClanHome, fetchClans, fetchMyClan, fetchWarLeaderboard, leaderboardOwnerToken])
 
   const joinClan = useCallback(async (clanKey) => {
-    const username = committedUsername.trim()
+    const username = await ensureClanIdentity()
     if (!username || !leaderboardOwnerToken) {
-      setClansStatus('Submit your leaderboard username first.')
+      setClansStatus('Set your leaderboard username first to use clans.')
       return
     }
 
@@ -1297,14 +1325,14 @@ function App() {
     } catch (error) {
       setClansStatus(error instanceof Error ? error.message : 'Could not join clan.')
     }
-  }, [clanSearchTerm, committedUsername, fetchClanHome, fetchClans, fetchMyClan, fetchWarLeaderboard, leaderboardOwnerToken])
+  }, [clanSearchTerm, ensureClanIdentity, fetchClanHome, fetchClans, fetchMyClan, fetchWarLeaderboard, leaderboardOwnerToken])
 
   const sendClanChat = useCallback(async () => {
     if (clanChatSending || !clanHome?.clan?.key) {
       return
     }
 
-    const username = committedUsername.trim()
+    const username = await ensureClanIdentity()
     const text = clanChatText.trim()
     if (!username || !text || !leaderboardOwnerToken) {
       return
@@ -1330,10 +1358,10 @@ function App() {
     } finally {
       setClanChatSending(false)
     }
-  }, [clanChatSending, clanChatText, clanHome?.clan?.key, committedUsername, leaderboardOwnerToken])
+  }, [clanChatSending, clanChatText, clanHome?.clan?.key, ensureClanIdentity, leaderboardOwnerToken])
 
   const fetchInvites = useCallback(async () => {
-    const username = committedUsername.trim()
+    const username = await ensureClanIdentity()
     if (!username || !leaderboardOwnerToken) return
     try {
       const response = await fetch(
@@ -1345,11 +1373,11 @@ function App() {
     } catch {
       setClanInvites([])
     }
-  }, [committedUsername, leaderboardOwnerToken])
+  }, [ensureClanIdentity, leaderboardOwnerToken])
 
   const saveClanSettings = useCallback(async () => {
     const clanKey = clanHome?.clan?.key ?? myClan?.key ?? ''
-    const username = committedUsername.trim()
+    const username = await ensureClanIdentity()
     if (!clanKey || !username || !leaderboardOwnerToken) return
 
     const formData = new FormData()
@@ -1379,11 +1407,11 @@ function App() {
     } catch (error) {
       setClansStatus(error instanceof Error ? error.message : 'Could not save settings.')
     }
-  }, [clanHome?.clan?.key, clanSearchTerm, committedUsername, fetchClanHome, fetchClans, fetchMyClan, fetchWarLeaderboard, leaderboardOwnerToken, myClan?.key, ownerClanDescription, ownerClanIcon, ownerClanName, ownerClanPermission])
+  }, [clanHome?.clan?.key, clanSearchTerm, ensureClanIdentity, fetchClanHome, fetchClans, fetchMyClan, fetchWarLeaderboard, leaderboardOwnerToken, myClan?.key, ownerClanDescription, ownerClanIcon, ownerClanName, ownerClanPermission])
 
   const sendInvite = useCallback(async () => {
     const clanKey = clanHome?.clan?.key ?? myClan?.key ?? ''
-    const username = committedUsername.trim()
+    const username = await ensureClanIdentity()
     const target = inviteUsername.trim()
     if (!clanKey || !username || !target || !leaderboardOwnerToken) return
 
@@ -1400,11 +1428,11 @@ function App() {
     } catch (error) {
       setClansStatus(error instanceof Error ? error.message : 'Could not send invite.')
     }
-  }, [clanHome?.clan?.key, committedUsername, inviteUsername, leaderboardOwnerToken, myClan?.key])
+  }, [clanHome?.clan?.key, ensureClanIdentity, inviteUsername, leaderboardOwnerToken, myClan?.key])
 
   const kickMember = useCallback(async (targetUsername) => {
     const clanKey = clanHome?.clan?.key ?? myClan?.key ?? ''
-    const username = committedUsername.trim()
+    const username = await ensureClanIdentity()
     if (!clanKey || !username || !targetUsername || !leaderboardOwnerToken) return
 
     try {
@@ -1420,11 +1448,11 @@ function App() {
     } catch (error) {
       setClansStatus(error instanceof Error ? error.message : 'Could not kick member.')
     }
-  }, [clanHome?.clan?.key, committedUsername, fetchClanHome, leaderboardOwnerToken, myClan?.key])
+  }, [clanHome?.clan?.key, ensureClanIdentity, fetchClanHome, leaderboardOwnerToken, myClan?.key])
 
   const leaveClan = useCallback(async () => {
     const clanKey = clanHome?.clan?.key ?? myClan?.key ?? ''
-    const username = committedUsername.trim()
+    const username = await ensureClanIdentity()
     if (!clanKey || !username || !leaderboardOwnerToken) return
 
     try {
@@ -1446,7 +1474,7 @@ function App() {
     } catch (error) {
       setClansStatus(error instanceof Error ? error.message : 'Could not leave clan.')
     }
-  }, [clanHome?.clan?.key, clanSearchTerm, committedUsername, fetchClans, fetchWarLeaderboard, leaderboardOwnerToken, myClan?.key])
+  }, [clanHome?.clan?.key, clanSearchTerm, ensureClanIdentity, fetchClans, fetchWarLeaderboard, leaderboardOwnerToken, myClan?.key])
 
   useEffect(() => {
     if (mainTab !== 'clans') {
@@ -2275,7 +2303,7 @@ function App() {
       .map(([upgradeId, level]) => [upgradeTitleById[upgradeId] ?? upgradeId, level])
     : []
   const currentLeaderboardUsername = (committedUsername || leaderboardUsername).trim().toLowerCase()
-  const canUseClans = committedUsername.trim().length > 0
+  const canUseClans = (committedUsername || leaderboardUsername).trim().length > 0
   const filteredJoinableClans = clansEntries.filter((entry) =>
     entry?.name?.toLowerCase().includes(clanSearchTerm.trim().toLowerCase()),
   )
@@ -2663,7 +2691,7 @@ function App() {
             </div>
 
             {!canUseClans && (
-              <p className="leaderboard-status error">Submit your leaderboard username first to create or join clans.</p>
+              <p className="leaderboard-status error">Set your leaderboard username first to create or join clans.</p>
             )}
 
             {clanNotice && <p className="leaderboard-status">{clanNotice}</p>}
