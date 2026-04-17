@@ -267,6 +267,13 @@ async function createFileStorage() {
 
           entries[existingIndex] = { ...entry, ownerTokenHash: existingOwnerTokenHash }
         } else {
+          // Remove any old entry owned by the same token so one token = one player
+          const oldIndex = entries.findIndex(
+            (item) => normalizeOwnerTokenHash(item.ownerTokenHash) === ownerTokenHash,
+          )
+          if (oldIndex >= 0) {
+            entries.splice(oldIndex, 1)
+          }
           entries.push({ ...entry, ownerTokenHash })
         }
 
@@ -410,6 +417,24 @@ async function createMongoStorage(uri) {
         const existingOwnerTokenHash = normalizeOwnerTokenHash(existingDoc.ownerTokenHash)
         if (!existingOwnerTokenHash) return { error: 'legacy_entry_locked' }
         if (existingOwnerTokenHash !== ownerTokenHash) return { error: 'ownership_required' }
+      } else {
+        // Remove any old entry owned by the same token so one token = one player
+        const oldDoc = await leaderboardEntryModel.findOne({ ownerTokenHash }).lean()
+        if (oldDoc) {
+          const oldUsernameKey = oldDoc.usernameKey
+          await leaderboardEntryModel.deleteOne({ ownerTokenHash })
+          // Remove the old username from any clan they belonged to or owned
+          if (clanModel) {
+            await clanModel.updateMany(
+              { 'members.usernameKey': oldUsernameKey },
+              { $pull: { members: { usernameKey: oldUsernameKey } } },
+            )
+            await clanModel.updateMany(
+              { 'pendingInvites.usernameKey': oldUsernameKey },
+              { $pull: { pendingInvites: { usernameKey: oldUsernameKey } } },
+            )
+          }
+        }
       }
 
       const { Double } = mongoose.mongo
