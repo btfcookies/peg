@@ -1044,6 +1044,45 @@
   font: 400 1.2rem/1 'VT323', monospace;
 }
 
+.clan-name-hover-target {
+  position: relative;
+  display: inline-flex;
+  align-items: center;
+  width: fit-content;
+  cursor: help;
+}
+
+.clan-members-tooltip {
+  position: absolute;
+  left: 0;
+  top: calc(100% + 6px);
+  z-index: 30;
+  display: none;
+  min-width: 170px;
+  max-width: 240px;
+  padding: 6px 8px;
+  border: 1px solid #36577f;
+  background: #081325;
+  box-shadow: 0 8px 16px rgba(3, 8, 17, 0.72);
+  gap: 2px;
+}
+
+.clan-name-hover-target:hover .clan-members-tooltip,
+.clan-name-hover-target:focus-visible .clan-members-tooltip {
+  display: grid;
+}
+
+.clan-member-tooltip-item {
+  color: #dceeff;
+  font: 400 0.9rem/1.05 'VT323', monospace;
+  white-space: nowrap;
+}
+
+.clan-member-owner-crown {
+  margin-left: 2px;
+  font-size: 0.82rem;
+}
+
 .clan-meta span,
 .clan-meta small {
   color: #728eb1;

@@ -606,6 +606,22 @@ async function getClanScoreMap(clans) {
 }
 
 function toClanCard(clan, score, rank) {
+  const members = Array.isArray(clan.members)
+    ? clan.members
+        .map((member) => {
+          const username = typeof member?.username === 'string' ? member.username.trim() : ''
+          if (!username) return null
+
+          const usernameKey =
+            typeof member?.usernameKey === 'string' && member.usernameKey.trim()
+              ? member.usernameKey.trim().toLowerCase()
+              : username.toLowerCase()
+
+          return { username, usernameKey }
+        })
+        .filter(Boolean)
+    : []
+
   return {
     id: String(clan._id),
     key: clan.key,
@@ -614,7 +630,8 @@ function toClanCard(clan, score, rank) {
     joinPermission: clan.joinPermission,
     iconUrl: clan.iconDataUrl,
     ownerUsername: clan.ownerUsername,
-    memberCount: Array.isArray(clan.members) ? clan.members.length : 0,
+    memberCount: members.length,
+    members,
     score,
     totalWarWins: clampNumber(clan.totalWarWins, 0, 0, MAX_RESOURCE_VALUE),
     rank,

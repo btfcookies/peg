@@ -2963,24 +2963,61 @@ function App() {
                 {clansLoading && clansEntries.length === 0 ? (
                   <p className="sidebar-note">Loading clans...</p>
                 ) : (
-                  clansEntries.map((clan) => (
-                    <article key={clan.key} className="clan-row" role="listitem">
-                      <div className="clan-rank">#{clan.rank}</div>
-                      <img src={clan.iconUrl} alt={`${clan.name} icon`} className="clan-icon" />
-                      <div className="clan-meta">
-                        <strong>{clan.name}</strong>
-                        <span>{clan.description}</span>
-                        <small>{clan.memberCount} members • {clan.totalWarWins} war wins • {clan.score.toLocaleString()} score</small>
-                      </div>
-                      <button
-                        className="clan-hover-join-btn"
-                        disabled={clan.joinPermission !== 'public' || !!myClan || !canUseClans}
-                        onClick={() => joinClan(clan.key)}
-                      >
-                        {clan.joinPermission === 'public' ? 'Join' : 'Private'}
-                      </button>
-                    </article>
-                  ))
+                  clansEntries.map((clan) => {
+                    const members = Array.isArray(clan.members)
+                      ? clan.members
+                          .map((member) => {
+                            if (typeof member === 'string') {
+                              return { username: member.trim(), usernameKey: member.trim().toLowerCase() }
+                            }
+                            const username = typeof member?.username === 'string' ? member.username.trim() : ''
+                            const usernameKey =
+                              typeof member?.usernameKey === 'string' ? member.usernameKey.trim().toLowerCase() : username.toLowerCase()
+                            return username ? { username, usernameKey } : null
+                          })
+                          .filter(Boolean)
+                      : []
+                    const ownerKey = typeof clan.ownerUsername === 'string' ? clan.ownerUsername.trim().toLowerCase() : ''
+                    const visibleMembers = members.slice(0, 10)
+                    const hasMoreMembers = members.length > 10
+
+                    return (
+                      <article key={clan.key} className="clan-row" role="listitem">
+                        <div className="clan-rank">#{clan.rank}</div>
+                        <img src={clan.iconUrl} alt={`${clan.name} icon`} className="clan-icon" />
+                        <div className="clan-meta">
+                          <strong className="clan-name-hover-target" tabIndex={0}>
+                            {clan.name}
+                            {members.length > 0 && (
+                              <span className="clan-members-tooltip" role="tooltip" aria-label={`${clan.name} members`}>
+                                {visibleMembers.map((member, index) => (
+                                  <span
+                                    key={`${clan.key}-${member.usernameKey || member.username}-${index}`}
+                                    className="clan-member-tooltip-item"
+                                  >
+                                    {member.username}
+                                    {member.usernameKey === ownerKey && (
+                                      <span className="clan-member-owner-crown" aria-label="Clan owner" title="Clan owner"> 👑</span>
+                                    )}
+                                  </span>
+                                ))}
+                                {hasMoreMembers && <span className="clan-member-tooltip-item">...</span>}
+                              </span>
+                            )}
+                          </strong>
+                          <span>{clan.description}</span>
+                          <small>{clan.memberCount} members • {clan.totalWarWins} war wins • {clan.score.toLocaleString()} score</small>
+                        </div>
+                        <button
+                          className="clan-hover-join-btn"
+                          disabled={clan.joinPermission !== 'public' || !!myClan || !canUseClans}
+                          onClick={() => joinClan(clan.key)}
+                        >
+                          {clan.joinPermission === 'public' ? 'Join' : 'Private'}
+                        </button>
+                      </article>
+                    )
+                  })
                 )}
               </div>
             )}
